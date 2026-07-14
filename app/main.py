@@ -204,7 +204,7 @@ async def container_health():
 async def index(request: Request):
     if not get_current_user(request):
         return RedirectResponse("/login", status_code=302)
-    return FileResponse("static/index.html")
+    return FileResponse("app/static/index.html")
 
 @app.get("/login")
 async def login_page():
@@ -214,7 +214,7 @@ async def login_page():
 async def history_page(request: Request):
     if not get_current_user(request):
         return RedirectResponse("/login", status_code=302)
-    return FileResponse("static/history.html")
+    return FileResponse("app/static/history.html")
 
 @app.post("/api/login")
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
