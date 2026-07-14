@@ -208,7 +208,7 @@ async def index(request: Request):
 
 @app.get("/login")
 async def login_page():
-    return FileResponse("static/login.html")
+    return FileResponse("app/static/login.html")
 
 @app.get("/history")
 async def history_page(request: Request):
