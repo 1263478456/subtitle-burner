@@ -7,11 +7,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      push_images:
-        description: "Push to registries?"
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -22,13 +17,18 @@ env:
   GHCR_REPOSITORY: ghcr.io/1263478456/subtitle-burner
 
 jobs:
+  # Step 1: 计算 tag / label
   meta:
     runs-on: ubuntu-latest
     outputs:
       tags: ${{ steps.meta.outputs.tags }}
       labels: ${{ steps.meta.outputs.labels }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
 
       - id: meta
         uses: docker/metadata-action@v5
@@ -41,6 +41,7 @@ jobs:
             type=semver,pattern={{version}}
             type=sha,format=short,prefix=sha-
 
+  # Step 2: 按平台分别构建并推送（推送到临时 tag，带架构后缀）
   build:
     needs: meta
     strategy:
@@ -50,12 +51,15 @@ jobs:
           - variant: cpu
             platform: linux/amd64
             dockerfile: app/Dockerfile.cpu
+            suffix: amd64
           - variant: cpu
             platform: linux/arm64
             dockerfile: app/Dockerfile.cpu
+            suffix: arm64
           - variant: gpu
             platform: linux/amd64
             dockerfile: app/Dockerfile.gpu
+            suffix: gpu
 
     runs-on: ubuntu-latest
     steps:
@@ -65,29 +69,72 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Login Docker Hub
+      - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login GHCR
+      - uses: docker/login-action@v3
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v5
+        id: build
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ needs.meta.outputs.tags }}
+          # 推送到架构专属 tag，后续 merge job 合并为多架构 manifest
+          tags: ${{ needs.meta.outputs.tags }}-${{ matrix.suffix }}
           labels: ${{ needs.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
           cache-to: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }},mode=max
+
+  # Step 3: 合并多架构 manifest（仅 push 事件执行）
+  merge-manifest:
+    if: github.event_name != 'pull_request'
+    needs: [meta, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tag-prefix: ["latest", "sha-"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge multi-arch manifest
+        run: |
+          set -euo pipefail
+
+          if [ "${{ matrix.tag-prefix }}" = "latest" ]; then
+            FINAL_TAG="latest"
+          else
+            FINAL_TAG="sha-${GITHUB_SHA::7}"
+          fi
+
+          echo "Creating multi-arch manifest for: $FINAL_TAG"
+
+          docker buildx imagetools create             --tag "$DOCKERHUB_REPOSITORY:${FINAL_TAG}"             "$DOCKERHUB_REPOSITORY:${FINAL_TAG}-amd64"             "$DOCKERHUB_REPOSITORY:${FINAL_TAG}-arm64"
+
+          docker buildx imagetools create             --tag "$GHCR_REPOSITORY:${FINAL_TAG}"             "$GHCR_REPOSITORY:${FINAL_TAG}-amd64"             "$GHCR_REPOSITORY:${FINAL_TAG}-arm64"
+
+          echo "Multi-arch manifest created for: $FINAL_TAG"
+        env:
+          DOCKERHUB_REPOSITORY: ${{ env.DOCKERHUB_REPOSITORY }}
+          GHCR_REPOSITORY: ${{ env.GHCR_REPOSITORY }}
