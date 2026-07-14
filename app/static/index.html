@@ -265,29 +265,27 @@ const setupDrop = (dropEl, onFile) => {
 };
 
 const checkReady = () => {
-  let ok = false;
-  if (mode === 'upload') ok = videoFile && subFile;
-  else ok = mediaPairs.length > 0;
-  $('#burnBtn').disabled = !ok;
-  updatePairUI();
+  if (mode === 'upload') {
+    $('#burnBtn').disabled = !(videoFile && subFile);
+  }
 };
 
 const updatePairUI = () => {
   const sec = $('#pairSection');
+  if (!sec) return;
   const cnt = $('#pairCount');
   const list = $('#pairList');
-  if (!sec) return;
   sec.style.display = (mode === 'media' && mediaPairs.length > 0) ? 'block' : 'none';
   cnt.textContent = mediaPairs.length;
   list.innerHTML = mediaPairs.map((p, i) =>
     '<div class="pair-row">' +
-    '<span class="vid" title="' + p.videoPath + '">VIDEO ' + p.videoName + '</span>' +
+    '<span class="vid" title="' + p.videoPath + '">V ' + p.videoName + '</span>' +
     '<span class="sep">+</span>' +
-    '<span class="sub" title="' + p.subPath + '"> SUB ' + p.subName + '</span>' +
+    '<span class="sub" title="' + p.subPath + '"> S ' + p.subName + '</span>' +
     '<button class="del-pair" onclick="removePair(' + i + ')">x</button>' +
     '</div>'
   ).join('');
-  checkReady();
+  $('#burnBtn').disabled = (mediaPairs.length === 0);
 };
 
 const addPair = (videoPath, videoName, subPath, subName) => {
