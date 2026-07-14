@@ -4,7 +4,7 @@
 # 基础镜像：jrottenberg/ffmpeg —— 官方 Debian slim + 静态 ffmpeg/ffprobe
 # 最终体积约 220 MB，比 python:slim + apt-get install ffmpeg 小 ~70%
 # =============================================================================
-FROM jrottenberg/ffmpeg:7.1-slim AS runtime
+FROM python:3.12-slim
 
 LABEL org.opencontainers.image.title="subtitle-burner" \
       org.opencontainers.image.description="Web UI for burning bilingual subtitles into video via ffmpeg, CPU variant" \
@@ -22,7 +22,7 @@ ENV PYTHONUNBUFFERED=1 \
 # 仅安装 Python 与运行时依赖。基础镜像已带 ffmpeg，无需额外 apt-get
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv ca-certificates tzdata curl tini \
+        python3 python3-pip python3-venv ffmpeg ca-certificates tzdata curl tini \
  && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
  && echo $TZ > /etc/timezone \
  && rm -rf /var/lib/apt/lists/*
@@ -49,8 +49,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/ || exit 1
 
-# 显式声明 ffmpeg 在 PATH（来自基础镜像）
-ENV PATH="/usr/local/bin:${PATH}"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers"]
