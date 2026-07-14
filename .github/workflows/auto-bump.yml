@@ -1,0 +1,53 @@
+name: auto-version-bump
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '.github/**'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  bump:
+    if: "!contains(github.event.head_commit.message, 'chore: bump version')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine next tag
+        id: tag
+        run: |
+          LATEST=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || echo "v3.0.0")
+
+          MAJOR=$(echo $LATEST | sed 's/v//;s/\.[0-9]*\.[0-9]*$//')
+          MINOR=$(echo $LATEST | sed 's/v[0-9]*\.//;s/\.[0-9]*$//')
+          PATCH=$(echo $LATEST | sed 's/.*\.//')
+
+          # bump patch
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+
+          echo "current=$LATEST" >> $GITHUB_OUTPUT
+          echo "next=$NEXT" >> $GITHUB_OUTPUT
+          echo "bumping $LATEST -> $NEXT"
+
+      - name: Update version file
+        run: |
+          echo "__version__ = \"${{ steps.tag.outputs.next }}\"" > app/__init__.py
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app/__init__.py
+          git commit -m "chore: bump version to ${{ steps.tag.outputs.next }}"
+          git tag "${{ steps.tag.outputs.next }}"
+          git push origin main --tags
