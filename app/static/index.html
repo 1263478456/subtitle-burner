@@ -210,52 +210,138 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.15); color: var(--text
 
 <script>
 let me = null, gpuStatus = null;
-let mode = 'upload';           // 'upload' or 'media'
+let mode = 'upload';
 let videoFile = null, subFile = null;
 let pickedVideo = null, pickedSub = null;
 let mediaPath = '';
 let selectedVideoMedia = null, selectedSubMedia = null;
 let pollTimer = null;
+let mediaPairs = [];
 
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
 
 const fmtSize = (b) => {
-  if (!b) return '';
-  const u = ['B','KB','MB','GB']; let i = 0; while (b >= 1024 && i < u.length-1) { b /= 1024; i++; }
+  if (!b) return '-';
+  const u = ['B','KB','MB','GB']; let i = 0;
+  while (b >= 1024 && i < u.length-1) { b /= 1024; i++; }
   return b.toFixed(1) + ' ' + u[i];
 };
 
-const toast = (msg, kind = 'success') => {
-  const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + kind;
-  setTimeout(() => t.className = 'toast ' + kind, 3000);
+const toast = (msg, kind) => {
+  const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + (kind||'success');
+  setTimeout(() => t.classList.remove('show'), 3000);
 };
 
 const setupDrop = (dropEl, onFile) => {
   const input = dropEl.querySelector('input');
+  dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('dragover'); });
+  dropEl.addEventListener('dragleave', () => dropEl.classList.remove('dragover'));
+  dropEl.addEventListener('drop', e => { e.preventDefault(); dropEl.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f) onFile(f); });
   dropEl.addEventListener('click', () => input.click());
-  input.addEventListener('change', (e) => { if (e.target.files[0]) onFile(e.target.files[0]); });
-  ['dragenter','dragover'].forEach(ev => dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.add('dragover'); }));
-  ['dragleave','drop'].forEach(ev => dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.remove('dragover'); }));
-  dropEl.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]); });
+  input.addEventListener('change', () => { const f = input.files[0]; if (f) onFile(f); });
 };
 
 const checkReady = () => {
   let ok = false;
   if (mode === 'upload') ok = videoFile && subFile;
-  else ok = pickedVideo && pickedSub;
+  else ok = mediaPairs.length > 0;
   $('#burnBtn').disabled = !ok;
+  updatePairUI();
+};
+
+const updatePairUI = () => {
+  const sec = $('#pairSection');
+  const cnt = $('#pairCount');
+  const list = $('#pairList');
+  if (!sec) return;
+  sec.style.display = (mode === 'media' && mediaPairs.length > 0) ? 'block' : 'none';
+  cnt.textContent = mediaPairs.length;
+  list.innerHTML = mediaPairs.map((p, i) =>
+    '<div class="pair-row">' +
+    '<span class="vid" title="' + p.videoPath + '">VIDEO ' + p.videoName + '</span>' +
+    '<span class="sep">+</span>' +
+    '<span class="sub" title="' + p.subPath + '"> SUB ' + p.subName + '</span>' +
+    '<button class="del-pair" onclick="removePair(' + i + ')">x</button>' +
+    '</div>'
+  ).join('');
+  checkReady();
+};
+
+const addPair = (videoPath, videoName, subPath, subName) => {
+  const dup = mediaPairs.find(p => p.videoPath === videoPath && p.subPath === subPath);
+  if (dup) return;
+  mediaPairs.push({ videoPath, videoName, subPath, subName, crf: $('#crf').value, preset: $('#preset').value, codec: $('#codec').value, style: $('#style').value });
+  updatePairUI();
+  toast('Paired: ' + videoName + ' + ' + subName);
+};
+
+const removePair = (i) => { mediaPairs.splice(i, 1); updatePairUI(); };
+const clearPairs = () => { mediaPairs = []; selectedVideoMedia = null; selectedSubMedia = null; updatePairUI(); };
+
+const smartPair = () => {
+  const items = Array.from($$('.media-item[data-type]'));
+  const videos = items.filter(el => el.dataset.type === 'video');
+  const subs = items.filter(el => el.dataset.type === 'sub');
+  let added = 0;
+  videos.forEach(vEl => {
+    const vPath = vEl.dataset.path;
+    const vName = vPath.split('/').pop();
+    const vBase = vName.replace(/\.[^.]+$/, '');
+    subs.forEach(sEl => {
+      const sPath = sEl.dataset.path;
+      const sName = sPath.split('/').pop();
+      const sBase = sName.replace(/\.[^.]+$/, '');
+      if (vBase === sBase && !mediaPairs.find(p => p.videoPath === vPath && p.subPath === sPath)) {
+        mediaPairs.push({ videoPath: vPath, videoName: vName, subPath: sPath, subName: sName, crf: $('#crf').value, preset: $('#preset').value, codec: $('#codec').value, style: $('#style').value });
+        added++;
+      }
+    });
+  });
+  updatePairUI();
+  if (added > 0) toast('Smart paired: ' + added + ' pairs');
+  else toast('No matching pairs found', 'error');
+};
+
+const batchBurn = async () => {
+  if (mediaPairs.length === 0) return;
+  const btn = $('#batchBurnBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  let ok = 0, fail = 0;
+  for (const p of mediaPairs) {
+    try {
+      const fd = new FormData();
+      fd.append('video_path', p.videoPath);
+      fd.append('subtitle_path', p.subPath);
+      fd.append('crf', p.crf);
+      fd.append('preset', p.preset);
+      fd.append('codec', p.codec);
+      fd.append('style', p.style);
+      const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
+      const data = await r.json();
+      addLocalTask(data.task_id, data.video_name);
+      ok++;
+    } catch (e) { fail++; }
+  }
+  btn.textContent = 'Batch burn all pairs';
+  btn.disabled = false;
+  toast('Done: ' + ok + ' success, ' + fail + ' failed');
+  if (ok > 0) pollTasks();
 };
 
 setupDrop($('#videoDrop'), (f) => {
   videoFile = f; $('#videoDrop').classList.add('has-file');
   $('#videoInfo').style.display = 'block';
-  $('#videoInfo').textContent = `${f.name} (${fmtSize(f.size)})`;
+  $('#videoInfo').textContent = f.name + ' (' + fmtSize(f.size) + ')';
   checkReady();
 });
+
 setupDrop($('#subDrop'), (f) => {
   subFile = f; $('#subDrop').classList.add('has-file');
   $('#subInfo').style.display = 'block';
-  $('#subInfo').textContent = `${f.name} (${fmtSize(f.size)})`;
+  $('#subInfo').textContent = f.name + ' (' + fmtSize(f.size) + ')';
   checkReady();
 });
 
@@ -265,9 +351,8 @@ const setTab = (t) => {
   $('#tab-media').classList.toggle('active', t === 'media');
   $('#tab-upload-area').style.display = t === 'upload' ? 'block' : 'none';
   $('#tab-media-area').style.display = t === 'media' ? 'block' : 'none';
+  if (t === 'upload') { pickedVideo = pickedSub = null; checkReady(); }
   if (t === 'media') loadMedia();
-  pickedVideo = pickedSub = null;
-  checkReady();
 };
 
 const setCodecOptions = (gpu) => {
@@ -278,45 +363,71 @@ const setCodecOptions = (gpu) => {
   });
 };
 
-const loadMedia = async (path = '') => {
+const loadMedia = async (path) => {
+  path = path || '';
   mediaPath = path;
   const r = await fetch('/api/media/list?path=' + encodeURIComponent(path));
   if (!r.ok) { toast((await r.json()).detail, 'error'); return; }
   const data = await r.json();
-  $('#mediaBreadcrumb').textContent = '📁 /' + (data.current_path || '');
+  $('#mediaBreadcrumb').textContent = ' /' + (data.current_path || '');
   const list = $('#mediaList');
   list.innerHTML = '';
-  if (!data.items.length) { list.innerHTML = '<div class="empty">空目录</div>'; return; }
+  if (!data.items.length) { list.innerHTML = '<div class="empty">empty</div>'; return; }
+
+  const mediaArea = $('#tab-media-area');
+  const oldInd = mediaArea.querySelector('.selection-indicator');
+  if (oldInd) oldInd.remove();
+
+  let indHtml = '';
+  if (selectedVideoMedia) indHtml += '<span class="tag vid">V: ' + selectedVideoMedia.split('/').pop() + '</span>';
+  if (selectedSubMedia) indHtml += '<span class="tag sub"> S: ' + selectedSubMedia.split('/').pop() + '</span>';
+  if (!selectedVideoMedia && !selectedSubMedia) indHtml = '<span class="tag none">Click video then subtitle to pair</span>';
+
+  const indDiv = document.createElement('div');
+  indDiv.className = 'selection-indicator';
+  indDiv.innerHTML = indHtml;
+  mediaArea.insertBefore(indDiv, mediaArea.firstChild);
+
   data.items.forEach(it => {
     const div = document.createElement('div');
     div.className = 'media-item';
     if (it.is_dir) {
-      div.innerHTML = `<span class="ic">📁</span><div class="nm">${it.name}</div>`;
+      div.innerHTML = '<span class="ic">DIR</span><div class="nm">' + it.name + '</div>';
       div.onclick = () => loadMedia(it.path);
     } else {
       const ext = it.ext;
-      const isVid = ['.mp4','.mkv','.avi','.mov','.flv','.webm','.ts'].includes(ext);
+      const isVid = ['.mp4','.mkv','.avi','.mov','.flv','.webm','.ts','.m4v','.mpg','.mpeg'].includes(ext);
       const isSub = ['.srt','.vtt','.ass','.ssa','.sub'].includes(ext);
-      div.dataset.path = it.path; div.dataset.type = isVid ? 'video' : isSub ? 'sub' : 'other';
-      const icon = isVid ? '🎬' : isSub ? '💬' : '📄';
-      div.innerHTML = `<span class="ic">${icon}</span><div class="nm">${it.name}</div><div class="sz">${fmtSize(it.size)}</div>`;
+      div.dataset.path = it.path;
+      div.dataset.type = isVid ? 'video' : isSub ? 'sub' : 'other';
+      div.innerHTML = '<span class="ic">' + (isVid ? 'V' : isSub ? 'S' : 'F') + '</span><div class="nm">' + it.name + '</div><div class="sz">' + fmtSize(it.size) + '</div>';
+      if (isVid && it.path === selectedVideoMedia) div.style.borderColor = '#3b82f6';
+      if (isSub && it.path === selectedSubMedia) div.style.borderColor = '#8b5cf6';
       if (isVid || isSub) {
         div.onclick = () => {
-          const siblings = Array.from(list.querySelectorAll('.media-item'));
-          siblings.forEach(s => s.style.borderColor = '');
-          div.style.borderColor = '#3b82f6';
-          if (isVid) selectedVideoMedia = it.path;
-          else selectedSubMedia = it.path;
+          if (isVid) selectedVideoMedia = (selectedVideoMedia === it.path) ? null : it.path;
+          else selectedSubMedia = (selectedSubMedia === it.path) ? null : it.path;
+          Array.from(list.querySelectorAll('.media-item[data-type="video"]')).forEach(el => {
+            el.style.borderColor = (el.dataset.path === selectedVideoMedia) ? '#3b82f6' : '';
+          });
+          Array.from(list.querySelectorAll('.media-item[data-type="sub"]')).forEach(el => {
+            el.style.borderColor = (el.dataset.path === selectedSubMedia) ? '#8b5cf6' : '';
+          });
+          loadMedia(path);
           if (selectedVideoMedia && selectedSubMedia) {
-            pickedVideo = selectedVideoMedia; pickedSub = selectedSubMedia;
-            checkReady();
-            toast('已选择视频与字幕，可以开始烧录', 'success');
+            const vName = selectedVideoMedia.split('/').pop();
+            const sName = selectedSubMedia.split('/').pop();
+            addPair(selectedVideoMedia, vName, selectedSubMedia, sName);
+            selectedVideoMedia = null;
+            selectedSubMedia = null;
+            loadMedia(path);
           }
         };
       }
     }
     list.appendChild(div);
   });
+  updatePairUI();
 };
 
 const startBurn = async () => {
@@ -326,20 +437,12 @@ const startBurn = async () => {
       const fd = new FormData();
       fd.append('video', videoFile); fd.append('subtitle', subFile);
       const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
-      if (!upRes.ok) throw new Error((await upRes.json()).detail || '上传失败');
+      if (!upRes.ok) throw new Error((await upRes.json()).detail || 'Upload failed');
       const upData = await upRes.json();
       await burnTask(upData.task_id, videoFile.name, subFile.name);
     } else {
-      const fd = new FormData();
-      fd.append('video_path', pickedVideo); fd.append('subtitle_path', pickedSub);
-      fd.append('crf', $('#crf').value); fd.append('preset', $('#preset').value);
-      fd.append('codec', $('#codec').value); fd.append('style', $('#style').value);
-      const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
-      if (!r.ok) throw new Error((await r.json()).detail || '提交失败');
-      const data = await r.json();
-      addLocalTask(data.task_id, data.video_name);
-      toast('任务已加入队列');
-      pollTasks(); return;
+      batchBurn();
+      return;
     }
   } catch (e) {
     toast(e.message, 'error'); btn.disabled = false;
@@ -352,8 +455,8 @@ const burnTask = async (taskId, vName, sName) => {
   fd.append('crf', $('#crf').value); fd.append('preset', $('#preset').value);
   fd.append('codec', $('#codec').value); fd.append('style', $('#style').value);
   const r = await fetch('/api/burn', { method: 'POST', body: fd });
-  if (!r.ok) throw new Error((await r.json()).detail || '提交失败');
-  toast('任务已加入队列');
+  if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
+  toast('Task queued');
   addLocalTask(taskId, vName);
   pollTasks();
 };
@@ -364,81 +467,75 @@ const addLocalTask = (taskId, name) => {
   const div = document.createElement('div');
   div.className = 'task-item';
   div.id = 'task-' + taskId;
-  div.innerHTML = `
-    <div class="task-head">
-      <span class="task-name">${name}</span>
-      <span class="task-id">${taskId}</span>
-    </div>
-    <span class="status queued" id="status-${taskId}">queued</span>
-    <div class="progress"><div class="progress-bar" id="prog-${taskId}"></div></div>
-    <div class="task-actions">
-      <button onclick="downloadTask('${taskId}')" disabled id="dl-${taskId}">下载</button>
-    </div>
-  `;
+  div.innerHTML = '<div class="task-head"><span class="task-name">' + name + '</span><span class="task-id">' + taskId + '</span></div><div class="status queued">queued</div>';
   list.prepend(div);
-  $('#burnBtn').disabled = false;
-  resetForm();
 };
 
+const pollTasks = () => {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const r = await fetch('/api/queue');
+    if (!r.ok) return;
+    const data = await r.json();
+    data.forEach(t => {
+      const el = document.getElementById('task-' + t.task_id);
+      if (!el) return;
+      const statusEl = el.querySelector('.status');
+      statusEl.className = 'status ' + t.status;
+      statusEl.textContent = t.status === 'processing' ? 'processing ' + (t.progress||0) + '%' : t.status;
+      if (t.status === 'completed' || t.status === 'failed') {
+        if (!el.querySelector('.task-actions')) {
+          const div = document.createElement('div');
+          div.className = 'task-actions';
+          if (t.status === 'completed') div.innerHTML = '<button onclick="downloadTask(\'' + t.task_id + '\')">download</button>';
+          div.innerHTML += '<button class="delete" onclick="removeTask(\'' + t.task_id + '\')">delete</button>';
+          el.appendChild(div);
+        }
+      }
+    });
+    if (data.every(t => t.status === 'completed' || t.status === 'failed')) {
+      clearInterval(pollTimer); pollTimer = null;
+    }
+  }, 2000);
+};
+
+const downloadTask = (id) => { window.location.href = '/api/download/' + id; };
+const removeTask = (id) => { document.getElementById('task-' + id) && document.getElementById('task-' + id).remove(); };
+
 const resetForm = () => {
-  videoFile = null; subFile = null; pickedVideo = null; pickedSub = null;
-  selectedVideoMedia = null; selectedSubMedia = null;
+  videoFile = subFile = null;
+  pickedVideo = pickedSub = null;
+  selectedVideoMedia = selectedSubMedia = null;
+  mediaPairs = [];
   $('#videoDrop').classList.remove('has-file');
   $('#subDrop').classList.remove('has-file');
-  $('#videoInfo').style.display = 'none'; $('#subInfo').style.display = 'none';
-  $('#videoInput').value = ''; $('#subInput').value = '';
-  $('#mediaList').querySelectorAll('.media-item').forEach(s => s.style.borderColor = '');
+  $('#videoInfo').style.display = 'none';
+  $('#subInfo').style.display = 'none';
+  updatePairUI();
   checkReady();
 };
 
-const pollTasks = async () => {
-  const r = await fetch('/api/queue');
-  if (!r.ok) return;
-  const data = await r.json();
-  data.tasks.forEach(t => {
-    const div = document.getElementById('task-' + t.task_id);
-    if (div) {
-      const st = div.querySelector('.status');
-      st.className = 'status ' + t.status; st.textContent = t.status;
-      document.getElementById('prog-' + t.task_id).style.width = (t.progress || 0) + '%';
-      const dl = document.getElementById('dl-' + t.task_id);
-      if (dl) dl.disabled = t.status !== 'completed';
-    }
-  });
-  if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = setTimeout(pollTasks, 2000);
-};
-
-const downloadTask = (id) => {
-  window.location.href = '/api/download/' + id;
-};
-
-const deleteTask = async (id) => {
-  if (!confirm('确定删除该任务？')) return;
-  await fetch('/api/history/' + id, { method: 'DELETE' });
-  const el = document.getElementById('task-' + id); if (el) el.remove();
-};
-
-window.deleteTask = deleteTask;
-window.downloadTask = downloadTask;
-
-const logout = async () => {
-  await fetch('/api/logout', { method: 'POST' });
-  location.href = '/login';
-};
+const logout = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
 
 (async () => {
   const r = await fetch('/api/me');
   if (!r.ok) { location.href = '/login'; return; }
-  me = await r.json(); $('#userName').textContent = '👤 ' + me.user;
-  const g = await (await fetch('/api/gpu/status')).json();
-  gpuStatus = g; setCodecOptions(g);
-  if (g.gpu_info) {
-    $('#gpuInfo').style.display = 'block';
-    $('#gpuInfo').innerHTML = `<b>🎮 ${g.gpu_info.name}</b> · ${g.gpu_info.memory} · 推荐编码器 <b>${g.recommended_encoder}</b>`;
-  }
+  me = await r.json();
+  $('#userName').textContent = ' user ' + me.user;
+  try {
+    const gr = await fetch('/api/gpu/status');
+    if (gr.ok) {
+      gpuStatus = await gr.json();
+      if (gpuStatus.available_encoders.length > 0) {
+        $('#gpuInfo').style.display = 'block';
+        $('#gpuInfo').innerHTML = 'GPU: <b>' + gpuStatus.available_encoders.join(', ') + '</b>';
+        setCodecOptions(gpuStatus);
+      }
+    }
+  } catch (e) {}
   pollTasks();
 })();
+
 </script>
 </body>
 </html>
