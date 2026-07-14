@@ -1,0 +1,10 @@
+.env
+.git
+.gitignore
+data/
+README.md
+LICENSE
+.vscode/
+.idea/
+__pycache__/
+*.log

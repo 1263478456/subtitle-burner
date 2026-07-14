@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字幕烧录 · 控制台</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f172a; --panel: #1e293b; --border: #334155;
+  --text: #e2e8f0; --muted: #94a3b8; --dim: #64748b;
+  --primary: #3b82f6; --purple: #8b5cf6;
+  --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+}
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       background: var(--bg); color: var(--text); min-height: 100vh; }
+header { background: var(--panel); border-bottom: 1px solid var(--border);
+         padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
+header h1 { font-size: 18px;
+  background: linear-gradient(135deg, var(--primary), var(--purple));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+nav { display: flex; gap: 8px; }
+nav a { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
+nav a:hover, nav a.active { background: rgba(59,130,246,0.15); color: var(--text); }
+.user { color: var(--muted); font-size: 13px; margin-right: 12px; }
+.user button { padding: 6px 12px; background: transparent; color: var(--muted);
+              border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.user button:hover { color: var(--text); }
+.container { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+.panel h2 { font-size: 15px; margin-bottom: 16px; color: var(--muted); font-weight: 500; }
+.form-row { margin-bottom: 14px; }
+.form-row label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.form-row input[type=text], .form-row input[type=number], .form-row select {
+  width: 100%; padding: 10px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: rgba(15,23,42,0.5);
+  color: var(--text); font-size: 13px; outline: none;
+}
+.form-row input:focus, .form-row select:focus { border-color: var(--primary); }
+.upload-area {
+  border: 2px dashed var(--border); border-radius: 8px; padding: 24px;
+  text-align: center; cursor: pointer; transition: all 0.15s;
+  margin-bottom: 14px;
+}
+.upload-area:hover, .upload-area.dragover { border-color: var(--primary); background: rgba(59,130,246,0.05); }
+.upload-area .hint { color: var(--dim); font-size: 12px; margin-top: 6px; }
+.upload-area.has-file { border-color: var(--ok); background: rgba(16,185,129,0.05); }
+.btn { padding: 10px 18px; border-radius: 6px; border: none; cursor: pointer;
+       font-size: 13px; font-weight: 500; transition: opacity 0.15s; }
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--purple)); color: #fff; }
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+.btn-ghost:hover { color: var(--text); border-color: var(--primary); }
+.actions { display: flex; gap: 8px; margin-top: 18px; }
+.task-list { display: flex; flex-direction: column; gap: 10px; max-height: 540px; overflow-y: auto; }
+.task-item {
+  background: rgba(15,23,42,0.5); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px;
+}
+.task-head { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; }
+.task-name { color: var(--text); font-weight: 500; max-width: 65%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-id { color: var(--dim); font-family: monospace; font-size: 11px; }
+.status {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 500;
+}
+.status.queued { background: rgba(148,163,184,0.2); color: #cbd5e1; }
+.status.processing { background: rgba(59,130,246,0.2); color: #60a5fa; }
+.status.completed { background: rgba(16,185,129,0.2); color: var(--ok); }
+.status.failed { background: rgba(239,68,68,0.2); color: var(--err); }
+.progress { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 4px; }
+.progress-bar { height: 100%; background: linear-gradient(90deg, var(--primary), var(--purple));
+                width: 0%; transition: width 0.3s; }
+.task-actions { display: flex; gap: 6px; margin-top: 8px; }
+.task-actions button { padding: 5px 12px; border-radius: 4px; border: none;
+                       cursor: pointer; font-size: 12px; background: var(--border); color: var(--text); }
+.task-actions button:hover { background: var(--primary); }
+.task-actions button.delete:hover { background: var(--err); }
+.empty { text-align: center; color: var(--dim); padding: 40px; font-size: 13px; }
+.gpu-info { background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3);
+            padding: 10px 14px; border-radius: 6px; margin-bottom: 14px; font-size: 12px; color: #c4b5fd; }
+.gpu-info b { color: #ddd6fe; }
+.toast { position: fixed; top: 24px; right: 24px; padding: 12px 20px; border-radius: 8px;
+         font-size: 13px; opacity: 0; transform: translateX(20px); transition: all 0.25s;
+         z-index: 1000; }
+.toast.show { opacity: 1; transform: translateX(0); }
+.toast.success { background: rgba(16,185,129,0.2); color: var(--ok); border: 1px solid var(--ok); }
+.toast.error { background: rgba(239,68,68,0.2); color: var(--err); border: 1px solid var(--err); }
+.file-input { display: none; }
+.media-tab { display: none; }
+.media-tab.active { display: block; }
+.breadcrumb { color: var(--muted); font-size: 13px; margin-bottom: 12px; word-break: break-all; }
+.media-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.media-item {
+  background: rgba(15,23,42,0.5); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px; cursor: pointer;
+}
+.media-item:hover { border-color: var(--primary); }
+.media-item .ic { font-size: 20px; display: block; margin-bottom: 6px; }
+.media-item .nm { color: var(--text); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-item .sz { color: var(--dim); font-size: 11px; margin-top: 4px; }
+.upload-tab-btns { display: flex; gap: 6px; margin-bottom: 16px; }
+.upload-tab-btns button { padding: 6px 14px; border-radius: 4px; border: 1px solid var(--border);
+                          background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+.upload-tab-btns button.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔥 字幕烧录工具</h1>
+  <nav>
+    <a class="active">主控制台</a>
+    <a href="/history">历史记录</a>
+  </nav>
+  <div class="user">
+    <span id="userName"></span>
+    <button onclick="logout()">退出</button>
+  </div>
+</header>
+
+<div class="container">
+  <div class="grid">
+    <div class="panel" id="burnPanel">
+      <h2>新建烧录任务</h2>
+      <div id="gpuInfo" class="gpu-info" style="display:none"></div>
+
+      <div class="upload-tab-btns">
+        <button id="tab-upload" class="active" onclick="setTab('upload')">📤 上传文件</button>
+        <button id="tab-media" onclick="setTab('media')">📁 从媒体库选择</button>
+      </div>
+
+      <div class="media-tab" id="tab-upload-area" style="display:block">
+        <div class="upload-area" id="videoDrop">
+          <div>📹 拖拽视频文件到此处，或点击选择</div>
+          <div class="hint">支持 mp4 / mkv / avi / mov / flv / webm · 最大 2 GB</div>
+          <input type="file" class="file-input" id="videoInput" accept="video/*">
+        </div>
+        <div id="videoInfo" style="display:none; margin-bottom:14px; font-size:12px; color:var(--ok)"></div>
+
+        <div class="upload-area" id="subDrop">
+          <div>💬 拖拽字幕文件到此处，或点击选择</div>
+          <div class="hint">支持 ssa / ass / srt / vtt / sub</div>
+          <input type="file" class="file-input" id="subInput" accept=".srt,.vtt,.ass,.ssa,.sub">
+        </div>
+        <div id="subInfo" style="display:none; margin-bottom:14px; font-size:12px; color:var(--ok)"></div>
+      </div>
+
+      <div class="media-tab" id="tab-media-area">
+        <div class="breadcrumb" id="mediaBreadcrumb">📁 /</div>
+        <div class="media-list" id="mediaList">
+          <div class="empty">加载中...</div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-top:14px">
+        <label>字幕样式（仅 SRT/VTT）</label>
+        <input type="text" id="style" placeholder="FontSize=20,PrimaryColour=&H00FFFFFF,Outline=2">
+      </div>
+
+      <div style="display:flex; gap:14px">
+        <div class="form-row" style="flex:1">
+          <label>编码器</label>
+          <select id="codec">
+            <option value="libx264">CPU · H.264</option>
+            <option value="libx265">CPU · H.265</option>
+            <option value="h264_nvenc">GPU · H.264 (NVENC)</option>
+            <option value="hevc_nvenc">GPU · H.265 (NVENC)</option>
+            <option value="h264_qsv">GPU · H.264 (QSV)</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex:1">
+          <label>CRF (18-28)</label>
+          <input type="number" id="crf" value="18" min="0" max="51">
+        </div>
+        <div class="form-row" style="flex:1">
+          <label>预设</label>
+          <select id="preset">
+            <option value="ultrafast">ultrafast</option>
+            <option value="superfast">superfast</option>
+            <option value="veryfast">veryfast</option>
+            <option value="faster">faster</option>
+            <option value="fast">fast</option>
+            <option value="medium" selected>medium</option>
+            <option value="slow">slow</option>
+            <option value="veryslow">veryslow</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" id="burnBtn" disabled onclick="startBurn()">🚀 开始烧录</button>
+        <button class="btn btn-ghost" onclick="resetForm()">重置</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>最近任务</h2>
+      <div class="task-list" id="taskList">
+        <div class="empty">暂无任务</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let me = null, gpuStatus = null;
+let mode = 'upload';           // 'upload' or 'media'
+let videoFile = null, subFile = null;
+let pickedVideo = null, pickedSub = null;
+let mediaPath = '';
+let selectedVideoMedia = null, selectedSubMedia = null;
+let pollTimer = null;
+
+const $ = (s) => document.querySelector(s);
+
+const fmtSize = (b) => {
+  if (!b) return '';
+  const u = ['B','KB','MB','GB']; let i = 0; while (b >= 1024 && i < u.length-1) { b /= 1024; i++; }
+  return b.toFixed(1) + ' ' + u[i];
+};
+
+const toast = (msg, kind = 'success') => {
+  const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + kind;
+  setTimeout(() => t.className = 'toast ' + kind, 3000);
+};
+
+const setupDrop = (dropEl, onFile) => {
+  const input = dropEl.querySelector('input');
+  dropEl.addEventListener('click', () => input.click());
+  input.addEventListener('change', (e) => { if (e.target.files[0]) onFile(e.target.files[0]); });
+  ['dragenter','dragover'].forEach(ev => dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.add('dragover'); }));
+  ['dragleave','drop'].forEach(ev => dropEl.addEventListener(ev, (e) => { e.preventDefault(); dropEl.classList.remove('dragover'); }));
+  dropEl.addEventListener('drop', (e) => { if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]); });
+};
+
+const checkReady = () => {
+  let ok = false;
+  if (mode === 'upload') ok = videoFile && subFile;
+  else ok = pickedVideo && pickedSub;
+  $('#burnBtn').disabled = !ok;
+};
+
+setupDrop($('#videoDrop'), (f) => {
+  videoFile = f; $('#videoDrop').classList.add('has-file');
+  $('#videoInfo').style.display = 'block';
+  $('#videoInfo').textContent = `${f.name} (${fmtSize(f.size)})`;
+  checkReady();
+});
+setupDrop($('#subDrop'), (f) => {
+  subFile = f; $('#subDrop').classList.add('has-file');
+  $('#subInfo').style.display = 'block';
+  $('#subInfo').textContent = `${f.name} (${fmtSize(f.size)})`;
+  checkReady();
+});
+
+const setTab = (t) => {
+  mode = t;
+  $('#tab-upload').classList.toggle('active', t === 'upload');
+  $('#tab-media').classList.toggle('active', t === 'media');
+  $('#tab-upload-area').style.display = t === 'upload' ? 'block' : 'none';
+  $('#tab-media-area').style.display = t === 'media' ? 'block' : 'none';
+  if (t === 'media') loadMedia();
+  pickedVideo = pickedSub = null;
+  checkReady();
+};
+
+const setCodecOptions = (gpu) => {
+  const sel = $('#codec');
+  Array.from(sel.options).forEach(o => {
+    if (o.value === 'h264_nvenc' || o.value === 'hevc_nvenc') o.disabled = !gpu.available_encoders.includes(o.value);
+    if (o.value === 'h264_qsv') o.disabled = !gpu.available_encoders.includes(o.value);
+  });
+};
+
+const loadMedia = async (path = '') => {
+  mediaPath = path;
+  const r = await fetch('/api/media/list?path=' + encodeURIComponent(path));
+  if (!r.ok) { toast((await r.json()).detail, 'error'); return; }
+  const data = await r.json();
+  $('#mediaBreadcrumb').textContent = '📁 /' + (data.current_path || '');
+  const list = $('#mediaList');
+  list.innerHTML = '';
+  if (!data.items.length) { list.innerHTML = '<div class="empty">空目录</div>'; return; }
+  data.items.forEach(it => {
+    const div = document.createElement('div');
+    div.className = 'media-item';
+    if (it.is_dir) {
+      div.innerHTML = `<span class="ic">📁</span><div class="nm">${it.name}</div>`;
+      div.onclick = () => loadMedia(it.path);
+    } else {
+      const ext = it.ext;
+      const isVid = ['.mp4','.mkv','.avi','.mov','.flv','.webm','.ts'].includes(ext);
+      const isSub = ['.srt','.vtt','.ass','.ssa','.sub'].includes(ext);
+      div.dataset.path = it.path; div.dataset.type = isVid ? 'video' : isSub ? 'sub' : 'other';
+      const icon = isVid ? '🎬' : isSub ? '💬' : '📄';
+      div.innerHTML = `<span class="ic">${icon}</span><div class="nm">${it.name}</div><div class="sz">${fmtSize(it.size)}</div>`;
+      if (isVid || isSub) {
+        div.onclick = () => {
+          const siblings = Array.from(list.querySelectorAll('.media-item'));
+          siblings.forEach(s => s.style.borderColor = '');
+          div.style.borderColor = '#3b82f6';
+          if (isVid) selectedVideoMedia = it.path;
+          else selectedSubMedia = it.path;
+          if (selectedVideoMedia && selectedSubMedia) {
+            pickedVideo = selectedVideoMedia; pickedSub = selectedSubMedia;
+            checkReady();
+            toast('已选择视频与字幕，可以开始烧录', 'success');
+          }
+        };
+      }
+    }
+    list.appendChild(div);
+  });
+};
+
+const startBurn = async () => {
+  const btn = $('#burnBtn'); btn.disabled = true;
+  try {
+    if (mode === 'upload') {
+      const fd = new FormData();
+      fd.append('video', videoFile); fd.append('subtitle', subFile);
+      const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
+      if (!upRes.ok) throw new Error((await upRes.json()).detail || '上传失败');
+      const upData = await upRes.json();
+      await burnTask(upData.task_id, videoFile.name, subFile.name);
+    } else {
+      const fd = new FormData();
+      fd.append('video_path', pickedVideo); fd.append('subtitle_path', pickedSub);
+      fd.append('crf', $('#crf').value); fd.append('preset', $('#preset').value);
+      fd.append('codec', $('#codec').value); fd.append('style', $('#style').value);
+      const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
+      if (!r.ok) throw new Error((await r.json()).detail || '提交失败');
+      const data = await r.json();
+      addLocalTask(data.task_id, data.video_name);
+      toast('任务已加入队列');
+      pollTasks(); return;
+    }
+  } catch (e) {
+    toast(e.message, 'error'); btn.disabled = false;
+  }
+};
+
+const burnTask = async (taskId, vName, sName) => {
+  const fd = new FormData();
+  fd.append('task_id', taskId); fd.append('video_name', vName); fd.append('subtitle_name', sName);
+  fd.append('crf', $('#crf').value); fd.append('preset', $('#preset').value);
+  fd.append('codec', $('#codec').value); fd.append('style', $('#style').value);
+  const r = await fetch('/api/burn', { method: 'POST', body: fd });
+  if (!r.ok) throw new Error((await r.json()).detail || '提交失败');
+  toast('任务已加入队列');
+  addLocalTask(taskId, vName);
+  pollTasks();
+};
+
+const addLocalTask = (taskId, name) => {
+  const list = $('#taskList');
+  if (list.querySelector('.empty')) list.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'task-item';
+  div.id = 'task-' + taskId;
+  div.innerHTML = `
+    <div class="task-head">
+      <span class="task-name">${name}</span>
+      <span class="task-id">${taskId}</span>
+    </div>
+    <span class="status queued" id="status-${taskId}">queued</span>
+    <div class="progress"><div class="progress-bar" id="prog-${taskId}"></div></div>
+    <div class="task-actions">
+      <button onclick="downloadTask('${taskId}')" disabled id="dl-${taskId}">下载</button>
+    </div>
+  `;
+  list.prepend(div);
+  $('#burnBtn').disabled = false;
+  resetForm();
+};
+
+const resetForm = () => {
+  videoFile = null; subFile = null; pickedVideo = null; pickedSub = null;
+  selectedVideoMedia = null; selectedSubMedia = null;
+  $('#videoDrop').classList.remove('has-file');
+  $('#subDrop').classList.remove('has-file');
+  $('#videoInfo').style.display = 'none'; $('#subInfo').style.display = 'none';
+  $('#videoInput').value = ''; $('#subInput').value = '';
+  $('#mediaList').querySelectorAll('.media-item').forEach(s => s.style.borderColor = '');
+  checkReady();
+};
+
+const pollTasks = async () => {
+  const r = await fetch('/api/queue');
+  if (!r.ok) return;
+  const data = await r.json();
+  data.tasks.forEach(t => {
+    const div = document.getElementById('task-' + t.task_id);
+    if (div) {
+      const st = div.querySelector('.status');
+      st.className = 'status ' + t.status; st.textContent = t.status;
+      document.getElementById('prog-' + t.task_id).style.width = (t.progress || 0) + '%';
+      const dl = document.getElementById('dl-' + t.task_id);
+      if (dl) dl.disabled = t.status !== 'completed';
+    }
+  });
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollTasks, 2000);
+};
+
+const downloadTask = (id) => {
+  window.location.href = '/api/download/' + id;
+};
+
+const deleteTask = async (id) => {
+  if (!confirm('确定删除该任务？')) return;
+  await fetch('/api/history/' + id, { method: 'DELETE' });
+  const el = document.getElementById('task-' + id); if (el) el.remove();
+};
+
+window.deleteTask = deleteTask;
+window.downloadTask = downloadTask;
+
+const logout = async () => {
+  await fetch('/api/logout', { method: 'POST' });
+  location.href = '/login';
+};
+
+(async () => {
+  const r = await fetch('/api/me');
+  if (!r.ok) { location.href = '/login'; return; }
+  me = await r.json(); $('#userName').textContent = '👤 ' + me.user;
+  const g = await (await fetch('/api/gpu/status')).json();
+  gpuStatus = g; setCodecOptions(g);
+  if (g.gpu_info) {
+    $('#gpuInfo').style.display = 'block';
+    $('#gpuInfo').innerHTML = `<b>🎮 ${g.gpu_info.name}</b> · ${g.gpu_info.memory} · 推荐编码器 <b>${g.recommended_encoder}</b>`;
+  }
+  pollTasks();
+})();
+</script>
+</body>
+</html>

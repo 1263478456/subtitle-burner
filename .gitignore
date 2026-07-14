@@ -1,0 +1,15 @@
+.env
+data/input/*
+data/output/*
+data/fonts/*
+data/db/*
+!data/input/.gitkeep
+!data/output/.gitkeep
+!data/fonts/.gitkeep
+!data/db/.gitkeep
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.log
+.DS_Store

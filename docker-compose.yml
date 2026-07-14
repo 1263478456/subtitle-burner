@@ -1,0 +1,196 @@
+# =============================================================================
+# 字幕烧录工具 · Docker Compose 编排文件
+# Subtitle Burner · Docker Compose orchestration
+#
+# 快速开始 / Quick start:
+#   cp .env.example .env  # 按需修改 SECRET_KEY / AUTH_USER / AUTH_PASS
+#   docker compose up -d  # CPU 模式启动（默认）
+#   docker compose --profile gpu up -d  # GPU 模式启动（需 NVIDIA Container Toolkit）
+#
+# 访问 / Access: http://<host-ip>:8000
+# =============================================================================
+
+name: subtitle-burner
+
+# 只声明 compose v3.9+，避免兼容旧版带来额外字段噪音
+version: "3.9"
+
+# -----------------------------------------------------------------------------
+# 服务定义 / Services
+# -----------------------------------------------------------------------------
+services:
+
+  # ============================================================
+  # CPU 服务（默认） · CPU service (default)
+  # ------------------------------------------------------------
+  # 构建并运行基于 jrottenberg/ffmpeg 的轻量 CPU 镜像
+  # ============================================================
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile.cpu      # 走 CPU 基础镜像
+      # 同时缓存层到本地，便于 CI 复用
+      cache_from:
+        - type=registry,ref=1263478456/subtitle-burner:cache
+        - type=local,src=/tmp/.buildx-cache
+
+    image: 1263478456/subtitle-burner:cpu-local
+    container_name: subtitle-burner
+
+    # 容器重启策略：除手动 stop 外，自动恢复
+    restart: unless-stopped
+
+    # 端口映射 / Port mapping
+    # - 8000:8000      主机端口:容器端口（按需改为 9000:8000 等）
+    # - IPv4 优先；如需纯 IPv6，把 published 写成 "[::]:8000:8000"
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${BIND_PORT:-8000}:8000"
+
+    # 环境变量 / Environment variables
+    environment:
+      # —— 服务端配置 / Server ——
+      TZ: Asia/Shanghai                  # 时区，与 Dockerfile 对齐
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}      # DEBUG / INFO / WARNING / ERROR
+
+      # —— 鉴权 / Auth ——  从 .env 注入；首次启动后请修改！
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      SESSION_SECRET: ${SESSION_SECRET:-please-change-me-in-production-32bytes-min}
+
+      # —— ffmpeg 编码参数 / ffmpeg encoder —
+      # 默认软件编码 libx264；若 GPU profile 启动会改为 h264_nvenc
+      # FFMPEG_PRESET: unused, remove
+      # FFMPEG_CRF: unused, remove
+
+    # 数据卷 / Volumes
+    # - ./data/uploads  上传素材（视频 / 字幕）
+    # - ./data/outputs  烧录产物
+    # - ./data/db       SQLite 历史数据库
+    # TrueNAS / NAS 用户：把主机路径替换为 NFS / SMB 挂载点
+    volumes:
+      - ./data:/app/data
+
+    # 网络 / Networks（独立网段，便于排查与未来扩展）
+    networks:
+      - burner-net
+
+    # 资源限制 / Resource limits（按需调整；TrueNAS 部署通常不做硬限制）
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: "4.0"
+    #       memory: 4G
+
+    # 健康检查（与 Dockerfile 内的 HEALTHCHECK 保持一致；Docker 会自动探测）
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+    # 日志轮转 / Log rotation（避免容器日志撑爆磁盘）
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    # 安全选项 / Security hardening
+    security_opt:
+      - no-new-privileges:true
+    # 容器只读根文件系统；通过 data 卷写入。激进场景使用
+    # read_only: true
+    # tmpfs:
+    #   - /tmp:size=512M,mode=1777
+
+    # 元数据 / Labels（便于 `docker ps --filter label=vendor=...` 过滤）
+    labels:
+      org.opencontainers.image.title: "subtitle-burner"
+      org.opencontainers.image.variant: "cpu"
+      com.github.iosmanthus.subtitle-burner.role: "app"
+
+  # ============================================================
+  # GPU 服务（可选） · GPU service (optional)
+  # ------------------------------------------------------------
+  # 通过 --profile gpu 启用；需要主机安装 NVIDIA Container Toolkit
+  # ============================================================
+  app-gpu:
+    profiles: ["gpu"]                    # 默认不启动，需显式指定
+    build:
+      context: .
+      dockerfile: app/Dockerfile.gpu
+      cache_from:
+        - type=registry,ref=1263478456/subtitle-burner:gpu-cache
+        - type=local,src=/tmp/.buildx-cache-gpu
+
+    image: 1263478456/subtitle-burner:gpu-local
+    container_name: subtitle-burner-gpu
+
+    restart: unless-stopped
+
+    ports:
+      - "${BIND_HOST:-0.0.0.0}:${BIND_PORT:-8001}:8000"   # GPU 错开端口避免冲突
+
+    environment:
+      TZ: Asia/Shanghai
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      SESSION_SECRET: ${SESSION_SECRET:-please-change-me-in-production-32bytes-min}
+      # GPU 编码器：h264_nvenc（也支持 hevc_nvenc，main.py 需识别）
+      # FFMPEG_PRESET: unused, remove
+      # FFMPEG_CRF: unused, remove
+      # FFMPEG_VCODEC: unused, remove
+
+    volumes:
+      - ./data:/app/data
+
+    networks:
+      - burner-net
+
+    # —— NVIDIA 运行时 —— 必须 + 必须在主机装好 nvidia-container-toolkit
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${NVIDIA_VISIBLE_DEVICES:-1}    # 默认用 1 张卡，可改成 "all"
+              capabilities: [gpu, video, compute, utility]
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s                  # GPU 容器启动稍慢，延长宽限
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    security_opt:
+      - no-new-privileges:true
+
+    labels:
+      org.opencontainers.image.title: "subtitle-burner"
+      org.opencontainers.image.variant: "gpu"
+      com.github.iosmanthus.subtitle-burner.role: "app"
+
+# -----------------------------------------------------------------------------
+# 网络 / Networks
+# -----------------------------------------------------------------------------
+networks:
+  burner-net:
+    name: burner-net
+    driver: bridge
+    # 如需纯 IPv6 或双栈：
+    # enable_ipv6: true
+    # ipam:
+    #   driver: default
+    #   config:
+    #     - subnet: 172.20.0.0/24
+    #     - subnet: "fd00:burner::/64"

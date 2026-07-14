@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# 字幕烧录工具 · CPU 镜像（默认 / amd64 / arm64）
+# 基础镜像：jrottenberg/ffmpeg —— 官方 Debian slim + 静态 ffmpeg/ffprobe
+# 最终体积约 220 MB，比 python:slim + apt-get install ffmpeg 小 ~70%
+# =============================================================================
+FROM jrottenberg/ffmpeg:7.1-slim AS runtime
+
+LABEL org.opencontainers.image.title="subtitle-burner" \
+      org.opencontainers.image.description="Web UI for burning bilingual subtitles into video via ffmpeg, CPU variant" \
+      org.opencontainers.image.source="https://github.com/1263478456/subtitle-burner" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.variant="cpu"
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8
+
+# 仅安装 Python 与运行时依赖。基础镜像已带 ffmpeg，无需额外 apt-get
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv ca-certificates tzdata curl tini \
+ && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+ && echo $TZ > /etc/timezone \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 先复制依赖清单 —— 利用 Docker 层缓存，仅当 requirements.txt 变化才重装
+COPY app/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 再复制应用代码
+COPY app/ ./app/
+
+# 非 root 运行（UID 1000 对齐 TrueNAS / LinuxServer 惯例）
+RUN groupadd --system --gid 1000 app \
+ && useradd  --system --uid 1000 --gid app --home-dir /app --shell /sbin/nologin app \
+ && mkdir -p /app/data /app/data/uploads /app/data/outputs /app/data/db \
+ && chown -R app:app /app
+USER app
+
+EXPOSE 8000
+
+# tini 负责收割僵尸进程；HEALTHCHECK 走首页（main.py 已挂载 StaticFiles）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8000/ || exit 1
+
+# 显式声明 ffmpeg 在 PATH（来自基础镜像）
+ENV PATH="/usr/local/bin:${PATH}"
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers"]

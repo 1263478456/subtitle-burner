@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · 字幕烧录工具</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  color: #e2e8f0;
+}
+.login-card {
+  background: rgba(30, 41, 59, 0.7);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 16px;
+  padding: 48px 40px;
+  width: 380px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+h1 {
+  text-align: center; font-size: 24px; margin-bottom: 8px;
+  background: linear-gradient(135deg, #60a5fa, #a78bfa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.subtitle { text-align: center; color: #94a3b8; font-size: 13px; margin-bottom: 32px; }
+.form-group { margin-bottom: 18px; }
+label { display: block; font-size: 13px; color: #94a3b8; margin-bottom: 6px; }
+input {
+  width: 100%; padding: 12px 14px; border-radius: 8px;
+  border: 1px solid #334155; background: rgba(15, 23, 42, 0.6);
+  color: #e2e8f0; font-size: 14px; outline: none;
+  transition: border-color 0.15s;
+}
+input:focus { border-color: #60a5fa; }
+button {
+  width: 100%; padding: 12px; margin-top: 12px;
+  border-radius: 8px; border: none;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff; font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s;
+}
+button:hover { opacity: 0.9; }
+.hint { text-align: center; font-size: 12px; color: #64748b; margin-top: 24px; }
+.error { background: rgba(239,68,68,0.15); color: #fca5a5; border-radius: 6px;
+         padding: 8px 12px; font-size: 13px; margin-bottom: 16px; display: none; }
+.error.show { display: block; }
+</style>
+</head>
+<body>
+<form class="login-card" id="loginForm">
+  <h1>字幕烧录工具</h1>
+  <div class="subtitle">Subtitle Burner · v2.0</div>
+  <div class="error" id="err"></div>
+  <div class="form-group">
+    <label for="username">用户名</label>
+    <input type="text" id="username" name="username" required autocomplete="username">
+  </div>
+  <div class="form-group">
+    <label for="password">密码</label>
+    <input type="password" id="password" name="password" required autocomplete="current-password">
+  </div>
+  <button type="submit">登录</button>
+  <div class="hint">首次登录请使用 ADMIN_USERNAME / ADMIN_PASSWORD 环境变量配置的用户</div>
+</form>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('err');
+  err.classList.remove('show');
+  const fd = new FormData(e.target);
+  try {
+    const r = await fetch('/api/login', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error((await r.json()).detail || '登录失败');
+    location.href = '/';
+  } catch (ex) {
+    err.textContent = ex.message; err.classList.add('show');
+  }
+});
+</script>
+</body>
+</html>

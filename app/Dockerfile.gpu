@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1.7
+# =============================================================================
+# 字幕烧录工具 · GPU 镜像（NVIDIA NVENC / NVDEC 硬件加速）
+# 基础镜像：nvidia/cuda —— Ubuntu 22.04 + CUDA 12.4 runtime + 精简系统
+# 需主机已安装 NVIDIA Container Toolkit（nvidia-docker2）
+# 需主机驱动 ≥ 535（对应 CUDA 12.4）
+# 仅构建 linux/amd64 —— ARM GPU 桌面卡暂不覆盖
+# =============================================================================
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
+
+LABEL org.opencontainers.image.title="subtitle-burner" \
+      org.opencontainers.image.description="Web UI for burning bilingual subtitles into video via ffmpeg, NVIDIA GPU variant with NVENC/NVDEC" \
+      org.opencontainers.image.source="https://github.com/1263478456/subtitle-burner" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.variant="gpu"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8
+
+# 一并安装：python3-pip、ffmpeg（带 nvenc/nvdec 运行时）、curl、tini、tzdata
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        software-properties-common \
+ && add-apt-repository -y universe \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv \
+        ffmpeg \
+        ca-certificates tzdata curl tini \
+ && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+ && echo $TZ > /etc/timezone \
+ && rm -rf /var/lib/apt/lists/*
+
+# 验证 NVIDIA 运行时可用（构建期确认 ffmpeg 支持 nvenc）
+RUN ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "h264_nvenc|hevc_nvenc" || \
+    echo "[WARN] ffmpeg 未检测到 nvenc 编码器 —— 运行时将自动回退到 libx264/libx265"
+
+WORKDIR /app
+
+COPY app/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ ./app/
+
+RUN groupadd --system --gid 1000 app \
+ && useradd  --system --uid 1000 --gid app --home-dir /app --shell /sbin/nologin app \
+ && mkdir -p /app/data /app/data/uploads /app/data/outputs /app/data/db \
+ && chown -R app:app /app
+USER app
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8000/ || exit 1
+
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=video,compute,utility
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers"]

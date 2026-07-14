@@ -1,0 +1,45 @@
+# ---- Python -----------------------------------------------------------------
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+env
+
+# ---- IDE / OS ---------------------------------------------------------------
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ---- Docker / build --------------------------------------------------------
+.git
+.gitignore
+.github
+.gitattributes
+
+# ---- Docs / examples / env --------------------------------------------------
+README.md
+LICENSE
+.env
+.env.*
+!.env.example
+
+# ---- Compose extras --------------------------------------------------------
+docker-compose*.yml
+data/
+*.log
+logs/
+media/
+
+# ---- Test artefacts --------------------------------------------------------
+tests/
+test_artifacts/
+tmp/

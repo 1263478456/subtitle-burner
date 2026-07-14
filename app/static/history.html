@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>历史记录 · 字幕烧录工具</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f172a; --panel: #1e293b; --border: #334155;
+  --text: #e2e8f0; --muted: #94a3b8; --dim: #64748b;
+  --primary: #3b82f6; --purple: #8b5cf6;
+  --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+}
+body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+       background: var(--bg); color: var(--text); min-height: 100vh; }
+header { background: var(--panel); border-bottom: 1px solid var(--border);
+         padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; }
+header h1 { font-size: 18px;
+  background: linear-gradient(135deg, var(--primary), var(--purple));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+nav { display: flex; gap: 8px; }
+nav a { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
+nav a:hover, nav a.active { background: rgba(59,130,246,0.15); color: var(--text); }
+.user { color: var(--muted); font-size: 13px; }
+.user button { padding: 6px 12px; background: transparent; color: var(--muted);
+              border: 1px solid var(--border); border-radius: 4px; cursor: pointer; margin-left: 12px; }
+.user button:hover { color: var(--text); }
+.container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
+.stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat { background: var(--panel); border: 1px solid var(--border);
+        border-radius: 8px; padding: 16px; text-align: center; }
+.stat .v { font-size: 24px; font-weight: 700; color: var(--text); }
+.stat .l { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.stat.ok .v { color: var(--ok); } .stat.err .v { color: var(--err); }
+.stat.warn .v { color: var(--warn); } .stat.proc .v { color: var(--primary); }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.panel-head h2 { font-size: 15px; color: var(--muted); font-weight: 500; }
+.toolbar { display: flex; gap: 8px; align-items: center; }
+.toolbar input { background: rgba(15,23,42,0.6); border: 1px solid var(--border);
+                 padding: 8px 12px; border-radius: 4px; color: var(--text); outline: none; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 12px; color: var(--muted); font-weight: 500;
+     border-bottom: 1px solid var(--border); font-size: 12px; }
+td { padding: 12px; border-bottom: 1px solid var(--border); }
+tr:hover td { background: rgba(15,23,42,0.5); }
+.tname { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tid { font-family: monospace; color: var(--dim); font-size: 11px; }
+.status {
+  display: inline-block; padding: 2px 10px; border-radius: 4px;
+  font-size: 11px; font-weight: 500;
+}
+.status.queued { background: rgba(148,163,184,0.2); color: #cbd5e1; }
+.status.processing { background: rgba(59,130,246,0.2); color: #60a5fa; }
+.status.completed { background: rgba(16,185,129,0.2); color: var(--ok); }
+.status.failed { background: rgba(239,68,68,0.2); color: var(--err); }
+.act-btn { padding: 4px 10px; background: var(--border); border: none;
+           border-radius: 4px; color: var(--text); cursor: pointer; font-size: 12px; margin-right: 4px; }
+.act-btn:hover { background: var(--primary); }
+.act-btn.del:hover { background: var(--err); }
+.pager { display: flex; justify-content: center; gap: 6px; margin-top: 16px; }
+.pager button { padding: 6px 12px; background: rgba(15,23,42,0.5); border: 1px solid var(--border);
+                color: var(--text); border-radius: 4px; cursor: pointer; font-size: 12px; }
+.pager button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pager button.active { background: var(--primary); border-color: var(--primary); }
+.empty { text-align: center; padding: 60px; color: var(--dim); }
+.err-cell { color: var(--err); font-size: 11px; max-width: 200px; overflow: hidden;
+            text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔥 字幕烧录工具</h1>
+  <nav>
+    <a href="/">主控制台</a>
+    <a class="active">历史记录</a>
+  </nav>
+  <div class="user">
+    <span id="userName"></span>
+    <button onclick="logout()">退出</button>
+  </div>
+</header>
+
+<div class="container">
+  <div class="stats">
+    <div class="stat"><div class="v" id="s-total">0</div><div class="l">总任务</div></div>
+    <div class="stat warn"><div class="v" id="s-queued">0</div><div class="l">队列中</div></div>
+    <div class="stat proc"><div class="v" id="s-proc">0</div><div class="l">处理中</div></div>
+    <div class="stat ok"><div class="v" id="s-ok">0</div><div class="l">已完成</div></div>
+    <div class="stat err"><div class="v" id="s-err">0</div><div class="l">失败</div></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>历史记录</h2>
+      <div class="toolbar">
+        <input type="text" id="search" placeholder="搜索视频名..." />
+        <button class="act-btn del" onclick="clearAll()">清空全部</button>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>视频</th><th>字幕</th><th>状态</th>
+          <th>大小</th><th>编码器</th><th>CRF</th><th>创建</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="8" class="empty">加载中...</td></tr>
+      </tbody>
+    </table>
+    <div class="pager" id="pager"></div>
+  </div>
+</div>
+
+<script>
+let page = 1, pageSize = 20, total = 0;
+const $ = (s) => document.querySelector(s);
+const fmtSize = (b) => {
+  if (!b) return '-';
+  const u = ['B','KB','MB','GB']; let i = 0; while (b >= 1024 && i < u.length-1) { b /= 1024; i++; }
+  return b.toFixed(1) + ' ' + u[i];
+};
+const fmtDate = (s) => s ? new Date(s).toLocaleString() : '-';
+
+const renderTask = (t) => {
+  const params = (typeof t.params === 'string' ? JSON.parse(t.params || '{}') : (t.params || {}));
+  return `
+    <tr id="row-${t.task_id}">
+      <td class="tname" title="${t.video_name || ''}">${t.video_name || '-'}</td>
+      <td class="tname" title="${t.subtitle_name || ''}">${t.subtitle_name || '-'}</td>
+      <td><span class="status ${t.status}">${t.status}${t.status === 'processing' ? ' ' + (t.progress || 0) + '%' : ''}</span>
+          ${t.error ? `<div class="err-cell" title="${t.error}">⚠ ${t.error}</div>` : ''}</td>
+      <td>${fmtSize(t.output_size)}</td>
+      <td>${params.codec || '-'}</td>
+      <td>${params.crf ?? '-'}</td>
+      <td><span class="tid">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</span></td>
+      <td>
+        <button class="act-btn" onclick="dl('${t.task_id}')" ${t.status !== 'completed' ? 'disabled' : ''}>下载</button>
+        <button class="act-btn del" onclick="del('${t.task_id}')">删除</button>
+      </td>
+    </tr>
+  `;
+};
+
+const loadStats = async () => {
+  const r = await fetch('/api/stats'); if (!r.ok) return;
+  const s = await r.json();
+  $('#s-total').textContent = s.total;
+  $('#s-queued').textContent = s.queued; $('#s-proc').textContent = s.processing;
+  $('#s-ok').textContent = s.completed; $('#s-err').textContent = s.failed;
+};
+
+const loadPage = async () => {
+  const r = await fetch('/api/history?page=' + page + '&page_size=' + pageSize);
+  if (!r.ok) return;
+  const data = await r.json(); total = data.total;
+  const tb = $('#tbody');
+  if (!data.items.length) { tb.innerHTML = '<tr><td colspan="8" class="empty">暂无记录</td></tr>'; }
+  else tb.innerHTML = data.items.map(renderTask).join('');
+  renderPager();
+};
+
+const renderPager = () => {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  let html = `<button onclick="goPage(${page-1})" ${page === 1 ? 'disabled' : ''}>上一页</button>`;
+  html += `<span style="padding:6px 12px;color:var(--muted)">${page} / ${pages} (共 ${total})</span>`;
+  html += `<button onclick="goPage(${page+1})" ${page >= pages ? 'disabled' : ''}>下一页</button>`;
+  $('#pager').innerHTML = html;
+};
+
+const goPage = (p) => { page = p; loadPage(); };
+const dl = (id) => { window.location.href = '/api/download/' + id; };
+const del = async (id) => {
+  if (!confirm('确定删除？')) return;
+  await fetch('/api/history/' + id, { method: 'DELETE' });
+  document.getElementById('row-' + id)?.remove();
+  loadStats(); loadPage();
+};
+const clearAll = async () => {
+  if (!confirm('清空所有历史记录？这将删除所有任务文件。')) return;
+  await fetch('/api/history/clear', { method: 'POST' });
+  loadStats(); loadPage();
+};
+const logout = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
+
+let searchTimer = null;
+$('#search').addEventListener('input', (e) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { page = 1; loadPage(); }, 300);
+});
+
+(async () => {
+  const r = await fetch('/api/me');
+  if (!r.ok) { location.href = '/login'; return; }
+  $('#userName').textContent = '👤 ' + (await r.json()).user;
+  loadStats(); loadPage();
+  setInterval(() => { loadStats(); if (document.querySelector('.status.processing')) loadPage(); }, 5000);
+})();
+</script>
+</body>
+</html>
