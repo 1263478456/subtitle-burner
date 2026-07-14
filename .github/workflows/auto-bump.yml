@@ -4,12 +4,9 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '.github/**'
 
 permissions:
   contents: write
-  packages: write
 
 jobs:
   bump:
@@ -20,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       - name: Determine next tag
         id: tag
