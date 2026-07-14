@@ -104,7 +104,7 @@ def verify_session_token(token):
     except (BadSignature, SignatureExpired):
         return None
 
-def get_current_user(request):
+def get_current_user(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         auth = request.headers.get("Authorization", "")
@@ -114,7 +114,7 @@ def get_current_user(request):
         return None
     return verify_session_token(token)
 
-def require_auth(request):
+def require_auth(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(401, "请先登录")
