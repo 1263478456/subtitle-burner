@@ -104,10 +104,6 @@ jobs:
           - variant: gpu
             platform: linux/amd64
             dockerfile: app/Dockerfile.gpu
-    if: |
-      (github.event_name == 'workflow_dispatch' && matrix.variant == inputs.variant) ||
-      (github.event_name == 'pull_request' && matrix.variant == 'cpu' && matrix.platform == 'linux/amd64') ||
-      (github.event_name == 'push')
     steps:
       - name: checkout
         uses: actions/checkout@v4
