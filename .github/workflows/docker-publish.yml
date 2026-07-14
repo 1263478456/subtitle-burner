@@ -107,6 +107,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -121,20 +123,22 @@ jobs:
       - name: Merge multi-arch manifest
         run: |
           set -euo pipefail
-
-          if [ "${{ matrix.tag-prefix }}" = "latest" ]; then
+          TAG="${{ matrix.tag-prefix }}"
+          if [ "$TAG" = "latest" ]; then
             FINAL_TAG="latest"
           else
             FINAL_TAG="sha-${GITHUB_SHA::7}"
           fi
-
-          echo "Creating multi-arch manifest for: $FINAL_TAG"
-
-          docker buildx imagetools create             --tag "$DOCKERHUB_REPOSITORY:${FINAL_TAG}"             "$DOCKERHUB_REPOSITORY:${FINAL_TAG}-amd64"             "$DOCKERHUB_REPOSITORY:${FINAL_TAG}-arm64"
-
-          docker buildx imagetools create             --tag "$GHCR_REPOSITORY:${FINAL_TAG}"             "$GHCR_REPOSITORY:${FINAL_TAG}-amd64"             "$GHCR_REPOSITORY:${FINAL_TAG}-arm64"
-
-          echo "Multi-arch manifest created for: $FINAL_TAG"
+          echo "target tag: $FINAL_TAG"
+          docker buildx imagetools create \
+            -t "$DOCKERHUB_REPOSITORY:${FINAL_TAG}" \
+            "$DOCKERHUB_REPOSITORY:${FINAL_TAG}-amd64" \
+            "$DOCKERHUB_REPOSITORY:${FINAL_TAG}-arm64"
+          docker buildx imagetools create \
+            -t "$GHCR_REPOSITORY:${FINAL_TAG}" \
+            "$GHCR_REPOSITORY:${FINAL_TAG}-amd64" \
+            "$GHCR_REPOSITORY:${FINAL_TAG}-arm64"
+          echo "done: $FINAL_TAG"
         env:
           DOCKERHUB_REPOSITORY: ${{ env.DOCKERHUB_REPOSITORY }}
           GHCR_REPOSITORY: ${{ env.GHCR_REPOSITORY }}
