@@ -1,96 +1,48 @@
-# =============================================================================
-# 字幕烧录工具 · Docker 镜像构建与发布流水线
-# 触发条件：
-#   - push 到 main/master: 打 latest (=cpu) + sha-xxx, 推两仓库
-#   - push tag v*.*.*:    打版本号 tag (cpu/gpu 变体), 推两仓库
-#   - pull_request:       仅 amd64 + cpu 构建 (不推送) 做语法验证
-#   - workflow_dispatch:  手动触发, 可指定 variant / push 开关
-# 变体：
-#   - cpu: linux/amd64 + linux/arm64 (jrottenberg/ffmpeg 多架构)
-#   - gpu: linux/amd64 only (nvidia/cuda 官方不提供 arm64)
-# 推送目标：
-#   - Docker Hub: 1263478456/subtitle-burner
-#   - GHCR:       ghcr.io/1263478456/subtitle-burner
-# 所需 Secrets：
-#   - DOCKERHUB_USERNAME   Docker Hub 用户名
-#   - DOCKERHUB_TOKEN      Docker Hub Access Token
-# =============================================================================
-
 name: docker-publish
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      push_images:
+        description: "Push to registries?"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
   packages: write
-  pull-requests: read
-
-on:
-  push:
-    branches: [main, master]
-    tags: ['v*.*.*']
-  pull_request:
-    branches: [main, master]
-  workflow_dispatch:
-    inputs:
-      variant:
-        description: Build variant
-        required: true
-        type: choice
-        default: cpu
-        options: [cpu, gpu]
-      push_images:
-        description: Whether to push images
-        required: true
-        type: choice
-        default: 'true'
-        options: ['true', 'false']
 
 env:
   DOCKERHUB_REPOSITORY: 1263478456/subtitle-burner
-  GHCR_REPOSITORY: ghcr.io/${{ github.repository_owner }}/subtitle-burner
+  GHCR_REPOSITORY: ghcr.io/1263478456/subtitle-burner
 
 jobs:
   meta:
-    name: compute-image-metadata
     runs-on: ubuntu-latest
     outputs:
       tags: ${{ steps.meta.outputs.tags }}
       labels: ${{ steps.meta.outputs.labels }}
-      version: ${{ steps.meta.outputs.version }}
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v4
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            name=${{ env.DOCKERHUB_REPOSITORY }},enable=${{ github.event_name != 'pull_request' }}
-            name=${{ env.GHCR_REPOSITORY }},enable=${{ github.event_name != 'pull_request' }}
+            ${{ env.DOCKERHUB_REPOSITORY }}
+            ${{ env.GHCR_REPOSITORY }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=match,pattern=v(.*),group=1
+            type=semver,pattern={{version}}
             type=sha,format=short,prefix=sha-
-            type=ref,event=branch
-            type=ref,event=pr
-          labels: |
-            org.opencontainers.image.title=subtitle-burner
-            org.opencontainers.image.description=Web UI for burning bilingual subtitles into video via ffmpeg
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.licenses=MIT
-            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
 
   build:
-    name: build-${{ matrix.variant }}-${{ matrix.platform }}
     needs: meta
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -104,46 +56,38 @@ jobs:
           - variant: gpu
             platform: linux/amd64
             dockerfile: app/Dockerfile.gpu
+
+    runs-on: ubuntu-latest
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: setup-qemu
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
+      - uses: docker/setup-qemu-action@v3
 
-      - name: setup-buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: login-dockerhub
-        if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_images == 'true')
+      - name: Login Docker Hub
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: login-ghcr
-        if: github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_images == 'true')
+      - name: Login GHCR
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      - name: build-and-push
+      - name: Build and push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
-          push: ${{ github.event_name != 'pull_request' && (github.event_name != 'workflow_dispatch' || inputs.push_images == 'true') }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ needs.meta.outputs.tags }}
+          labels: ${{ needs.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
           cache-to: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }},mode=max
-          builder: ${{ steps.buildx.outputs.name }}
-          provenance: false
-
