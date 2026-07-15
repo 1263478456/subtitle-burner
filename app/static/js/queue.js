@@ -167,10 +167,10 @@ const Queue = (() => {
         const fd = new FormData();
         fd.append('video_path', p.videoPath);
         fd.append('subtitle_path', p.subPath);
-        fd.append('crf', p.crf);
-        fd.append('preset', p.preset);
-        fd.append('codec', p.codec);
-        fd.append('style', p.style);
+        fd.append('crf', $('#crf').value);
+        fd.append('preset', $('#preset').value);
+        fd.append('codec', $('#codec').value);
+        fd.append('style', $('#style').value);
         fd.append('sub_mode', $('#subMode').value);
         fd.append('keep_original_sub', $('#keepOriginalSub').value === 'true');
         const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
