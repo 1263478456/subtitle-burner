@@ -27,12 +27,13 @@ const Queue = (() => {
     if (!el) return;
     const statusEl = el.querySelector('.status');
     statusEl.className = 'status ' + t.status;
-    statusEl.textContent = t.status === 'processing' ? '处理中 ' + (t.progress || 0) + '%' : 
+    const progressVal = parseFloat(t.progress) || 0;
+    statusEl.textContent = t.status === 'processing' ? '处理中 ' + progressVal.toFixed(2) + '%' : 
                            t.status === 'queued' ? '排队中' :
                            t.status === 'completed' ? '已完成' :
                            t.status === 'failed' ? '失败' : t.status;
     const pb = document.getElementById('pb-' + t.task_id);
-    if (pb) pb.style.width = (t.progress || 0) + '%';
+    if (pb) pb.style.width = progressVal + '%';
     
     // 移除旧的操作按钮（状态变化时需要更新）
     const oldActions = el.querySelector('.task-actions');

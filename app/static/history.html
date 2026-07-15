@@ -135,7 +135,7 @@ const renderTask = (t) => {
     <tr id="row-${t.task_id}">
       <td class="tname" title="${t.video_name || ''}">${t.video_name || '-'}</td>
       <td class="tname" title="${t.subtitle_name || ''}">${t.subtitle_name || '-'}</td>
-      <td><span class="status ${t.status}">${t.status === 'queued' ? '排队中' : t.status === 'processing' ? '处理中 ' + (t.progress || 0) + '%' : t.status === 'completed' ? '已完成' : '失败'}${t.error ? '' : ''}</span>
+      <td><span class="status ${t.status}">${t.status === 'queued' ? '排队中' : t.status === 'processing' ? '处理中 ' + (parseFloat(t.progress) || 0).toFixed(2) + '%' : t.status === 'completed' ? '已完成' : '失败'}${t.error ? '' : ''}</span>
           ${t.error ? `<div class="err-cell" title="${t.error}">⚠ ${t.error}</div>` : ''}</td>
       <td>${fmtSize(t.output_size)}</td>
       <td>${params.codec || '-'}</td>

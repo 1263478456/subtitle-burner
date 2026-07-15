@@ -207,7 +207,7 @@ async def run_burn_task(task_id):
                             h, m, s = parts
                             s = float(s)
                             current_time = float(h) * 3600 + float(m) * 60 + s
-                            progress = min(int((current_time / total_duration) * 100), 99)
+                            progress = min(round((current_time / total_duration) * 100, 2), 99.99)
                             tasks[task_id]["progress"] = progress
                             db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (progress, task_id))
                     except (ValueError, IndexError):
