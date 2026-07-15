@@ -34,7 +34,7 @@ const Media = (() => {
         '</div>'
       ).join('');
     }
-    if (typeof checkReady === 'function') checkReady();
+    if (window.checkReady) window.checkReady();
   };
 
   const addPair = (videoPath, videoName, subPath, subName) => {
@@ -46,8 +46,8 @@ const Media = (() => {
       codec: $('#codec').value, style: $('#style').value
     });
     // 强制把 mode 切到 media（防止用户在 upload 模式下误调）
-    if (typeof mode !== 'undefined' && mode !== 'media') {
-      mode = 'media';
+    if (window.mode && window.mode !== 'media') {
+      window.mode = 'media';
       const uploadBtn = $('#tab-upload');
       const mediaBtn = $('#tab-media');
       const uploadArea = $('#tab-upload-area');
@@ -59,8 +59,8 @@ const Media = (() => {
     }
     updatePairUI();
     // 显式再调一次 checkReady（防止 updatePairUI 因闭包时机问题失效）
-    if (typeof checkReady === 'function') {
-      try { checkReady(); } catch (e) { console.error('checkReady error:', e); }
+    if (window.checkReady) {
+      try { window.checkReady(); } catch (e) { console.error('checkReady error:', e); }
     }
     toast('Paired: ' + videoName + ' + ' + subName);
   };
@@ -81,16 +81,24 @@ const Media = (() => {
     const items = Array.from($$('.media-item[data-type]'));
     const videos = items.filter(el => el.dataset.type === 'video');
     const subs = items.filter(el => el.dataset.type === 'sub');
+    // 归一化 basename：去扩展名 + 去常见后缀（.zh, .en, .chs, .cht 等）
+    const normalize = (name) => {
+      let base = name.replace(/\.[^.]+$/, '');  // 去扩展名
+      base = base.replace(/\.(zh|chinese|en|english|chs|cht|jp|jpn|kor|kr)$/i, '');
+      return base.toLowerCase();
+    };
     let added = 0;
     videos.forEach(vEl => {
       const vPath = vEl.dataset.path;
       const vName = vPath.split('/').pop();
-      const vBase = vName.replace(/\.[^.]+$/, '');
+      const vBase = normalize(vName);
       subs.forEach(sEl => {
         const sPath = sEl.dataset.path;
         const sName = sPath.split('/').pop();
-        const sBase = sName.replace(/\.[^.]+$/, '');
-        if (vBase === sBase && !mediaPairs.find(p => p.videoPath === vPath && p.subPath === sPath)) {
+        const sBase = normalize(sName);
+        // 完全匹配 或 字幕 basename 是视频 basename 的前缀
+        if ((vBase === sBase || sBase.startsWith(vBase) || vBase.startsWith(sBase)) &&
+            !mediaPairs.find(p => p.videoPath === vPath && p.subPath === sPath)) {
           mediaPairs.push({
             videoPath: vPath, videoName: vName, subPath: sPath, subName: sName,
             crf: $('#crf').value, preset: $('#preset').value,
@@ -101,8 +109,9 @@ const Media = (() => {
       });
     });
     updatePairUI();
-    if (added > 0) toast('Smart paired: ' + added + ' pairs');
-    else toast('No matching pairs found', 'error');
+    if (window.checkReady) window.checkReady();
+    if (added > 0) toast('Smart paired: ' + added + ' pair(s)');
+    else toast('No matching pairs in current folder', 'error');
   };
 
   const loadMedia = async (path) => {
@@ -182,14 +191,14 @@ const Media = (() => {
       mediaBtn.classList.remove('active');
       uploadArea.style.display = 'block';
       mediaArea.style.display = 'none';
-      if (typeof mode !== 'undefined') mode = 'upload';
-      if (typeof checkReady === 'function') checkReady();
+      window.mode = 'upload';
+      if (window.checkReady) window.checkReady();
     } else if (tab === 'media') {
       uploadBtn.classList.remove('active');
       mediaBtn.classList.add('active');
       uploadArea.style.display = 'none';
       mediaArea.style.display = 'block';
-      if (typeof mode !== 'undefined') mode = 'media';
+      window.mode = 'media';
       // 如果媒体列表还没加载实际内容，自动加载根目录
       const list = $('#mediaList');
       if (list && !list.querySelector('.media-item')) {
@@ -198,7 +207,7 @@ const Media = (() => {
       // 确保配对区域可见，并刷新按钮状态
       const sec = $('#pairSection');
       if (sec) sec.style.display = 'block';
-      if (typeof checkReady === 'function') checkReady();
+      if (window.checkReady) window.checkReady();
     }
   };
 

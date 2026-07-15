@@ -40,7 +40,7 @@ const Upload = (() => {
     drop.classList.add('has-file');
     $('#videoInfo').style.display = 'block';
     $('#videoInfo').textContent = f.name + ' (' + fmtSize(f.size) + ')';
-    checkReady();
+    if (window.checkReady) window.checkReady();
   };
 
   const setSubFile = (f) => {
@@ -49,7 +49,7 @@ const Upload = (() => {
     drop.classList.add('has-file');
     $('#subInfo').style.display = 'block';
     $('#subInfo').textContent = f.name + ' (' + fmtSize(f.size) + ')';
-    checkReady();
+    if (window.checkReady) window.checkReady();
   };
 
   const isReady = () => videoFile && subFile;
@@ -61,7 +61,7 @@ const Upload = (() => {
     $('#subDrop').classList.remove('has-file');
     $('#videoInfo').style.display = 'none';
     $('#subInfo').style.display = 'none';
-    checkReady();
+    if (window.checkReady) window.checkReady();
   };
 
   const getVideoFile = () => videoFile;

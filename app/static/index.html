@@ -260,34 +260,54 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 
 <div class="toast" id="toast"></div>
 
+<script>
+// 全局状态（必须在模块脚本之前声明，模块通过 window.mode 读取）
+window.mode = 'upload';
+
+const setCodecOptions = (gpu) => {
+  const sel = $('#codec');
+  if (!sel) return;
+  Array.from(sel.options).forEach(o => {
+    if (['h264_nvenc', 'hevc_nvenc', 'h264_qsv', 'hevc_qsv', 'av1_nvenc'].includes(o.value)) {
+      o.disabled = !gpu.available_encoders.includes(o.value);
+    }
+  });
+};
+
+// 检查 burn 按钮是否可启用（被各模块回调）
+const checkReady = () => {
+  try {
+    const btn = $('#burnBtn');
+    if (!btn) return;
+    let ready = false;
+    if (window.mode === 'upload') {
+      ready = !!(window.Upload && Upload.isReady && Upload.isReady());
+    } else {
+      ready = !!(window.Media && Media.hasPairs && Media.hasPairs());
+    }
+    btn.disabled = !ready;
+  } catch (e) {
+    console.error('checkReady error:', e);
+  }
+};
+
+const resetForm = () => {
+  if (window.Upload && Upload.reset) Upload.reset();
+  if (window.Media && Media.clearAllPairs) Media.clearAllPairs();
+  const styleEl = $('#style');
+  if (styleEl) styleEl.value = '';
+};
+
+window.checkReady = checkReady;
+window.setCodecOptions = setCodecOptions;
+window.resetForm = resetForm;
+</script>
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/utils.js"></script>
 <script src="/static/js/upload.js"></script>
 <script src="/static/js/media.js"></script>
 <script src="/static/js/queue.js"></script>
 <script>
-const setCodecOptions = (gpu) => {
-  const sel = $('#codec');
-  Array.from(sel.options).forEach(o => {
-    if (o.value === 'h264_nvenc' || o.value === 'hevc_nvenc') o.disabled = !gpu.available_encoders.includes(o.value);
-    if (o.value === 'h264_qsv') o.disabled = !gpu.available_encoders.includes(o.value);
-  });
-};
-
-const resetForm = () => {
-  Upload.reset();
-  Media.clearAllPairs();
-  const styleEl = $('#style');
-  if (styleEl) styleEl.value = '';
-};
-
-const checkReady = () => {
-  const ready = mode === 'upload' ? Upload.isReady() : Media.getPairs().length > 0;
-  const btn = $('#burnBtn');
-  if (btn) btn.disabled = !ready;
-};
-
-let mode = 'upload';
 let me = null, gpuStatus = null;
 
 // 初始化
@@ -301,13 +321,18 @@ let me = null, gpuStatus = null;
     const gr = await fetch('/api/gpu/status');
     if (gr.ok) {
       gpuStatus = await gr.json();
-      if (gpuStatus.available_encoders.length > 0) {
-        $('#gpuInfo').style.display = 'block';
-        $('#gpuInfo').innerHTML = 'GPU: <b>' + gpuStatus.available_encoders.join(', ') + '</b>';
+      if (gpuStatus.available_encoders && gpuStatus.available_encoders.length > 0) {
+        const info = $('#gpuInfo');
+        if (info) {
+          info.style.display = 'block';
+          info.innerHTML = 'GPU: <b>' + gpuStatus.available_encoders.join(', ') + '</b>';
+        }
         setCodecOptions(gpuStatus);
       }
     }
   } catch (e) {}
+  // 进入页面后刷新一次按钮状态
+  checkReady();
   Queue.pollTasks();
 })();
 </script>
