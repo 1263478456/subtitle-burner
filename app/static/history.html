@@ -61,6 +61,8 @@ tr:hover td { background: #f1f5f9; }
 .act-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 .act-btn.del { color: var(--err); border-color: var(--err); }
 .act-btn.del:hover { background: var(--err); color: #fff; }
+.act-btn.stop { color: var(--err); border-color: var(--err); }
+.act-btn.stop:hover { background: var(--err); color: #fff; }
 .pager { display: flex; justify-content: center; gap: 6px; margin-top: 16px; }
 .pager button { padding: 6px 12px; background: #f1f5f9; border: 1px solid var(--border);
                 color: var(--text); border-radius: 4px; cursor: pointer; font-size: 12px; }
@@ -128,18 +130,21 @@ const fmtDate = (s) => s ? new Date(s).toLocaleString() : '-';
 
 const renderTask = (t) => {
   const params = (typeof t.params === 'string' ? JSON.parse(t.params || '{}') : (t.params || {}));
+  const isActive = t.status === 'queued' || t.status === 'processing';
   return `
     <tr id="row-${t.task_id}">
       <td class="tname" title="${t.video_name || ''}">${t.video_name || '-'}</td>
       <td class="tname" title="${t.subtitle_name || ''}">${t.subtitle_name || '-'}</td>
-      <td><span class="status ${t.status}">${t.status}${t.status === 'processing' ? ' ' + (t.progress || 0) + '%' : ''}</span>
+      <td><span class="status ${t.status}">${t.status === 'queued' ? '排队中' : t.status === 'processing' ? '处理中 ' + (t.progress || 0) + '%' : t.status === 'completed' ? '已完成' : '失败'}${t.error ? '' : ''}</span>
           ${t.error ? `<div class="err-cell" title="${t.error}">⚠ ${t.error}</div>` : ''}</td>
       <td>${fmtSize(t.output_size)}</td>
       <td>${params.codec || '-'}</td>
       <td>${params.crf ?? '-'}</td>
       <td><span class="tid">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</span></td>
       <td>
+        ${isActive ? `<button class="act-btn stop" onclick="stopTask('${t.task_id}')">⏹ 停止</button>` : ''}
         <button class="act-btn" onclick="dl('${t.task_id}')" ${t.status !== 'completed' ? 'disabled' : ''}>下载</button>
+        ${t.status === 'failed' ? `<button class="act-btn" onclick="retryTask('${t.task_id}')">重试</button>` : ''}
         <button class="act-btn del" onclick="del('${t.task_id}')">删除</button>
       </td>
     </tr>
@@ -174,6 +179,25 @@ const renderPager = () => {
 
 const goPage = (p) => { page = p; loadPage(); };
 const dl = (id) => { window.location.href = '/api/download/' + id; };
+const stopTask = async (id) => {
+  if (!confirm('确定要停止这个任务吗？')) return;
+  const r = await fetch('/api/stop/' + id, { method: 'POST' });
+  if (r.ok) {
+    loadStats(); loadPage();
+  } else {
+    const data = await r.json();
+    alert(data.detail || '停止失败');
+  }
+};
+const retryTask = async (id) => {
+  const r = await fetch('/api/retry/' + id, { method: 'POST' });
+  if (r.ok) {
+    loadStats(); loadPage();
+  } else {
+    const data = await r.json();
+    alert(data.detail || '重试失败');
+  }
+};
 const del = async (id) => {
   if (!confirm('确定删除？')) return;
   await fetch('/api/history/' + id, { method: 'DELETE' });
@@ -198,7 +222,7 @@ $('#search').addEventListener('input', (e) => {
   if (!r.ok) { location.href = '/login'; return; }
   $('#userName').textContent = '👤 ' + (await r.json()).user;
   loadStats(); loadPage();
-  setInterval(() => { loadStats(); if (document.querySelector('.status.processing')) loadPage(); }, 5000);
+  setInterval(() => { loadStats(); if (document.querySelector('.status.processing,.status.queued')) loadPage(); }, 5000);
 })();
 </script>
 </body>
