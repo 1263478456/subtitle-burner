@@ -27,29 +27,30 @@ const Queue = (() => {
     if (!el) return;
     const statusEl = el.querySelector('.status');
     statusEl.className = 'status ' + t.status;
-    statusEl.textContent = t.status === 'processing' ? 'processing ' + (t.progress || 0) + '%' : t.status;
+    statusEl.textContent = t.status === 'processing' ? '处理中 ' + (t.progress || 0) + '%' : 
+                           t.status === 'queued' ? '排队中' :
+                           t.status === 'completed' ? '已完成' :
+                           t.status === 'failed' ? '失败' : t.status;
     const pb = document.getElementById('pb-' + t.task_id);
     if (pb) pb.style.width = (t.progress || 0) + '%';
-    // 为 processing 状态添加停止按钮
-    if (t.status === 'processing') {
-      if (!el.querySelector('.task-actions')) {
-        const div = document.createElement('div');
-        div.className = 'task-actions';
-        div.innerHTML = '<button class="stop" onclick="Queue.stopTask(\'' + t.task_id + '\')">⏹ 停止</button>';
-        el.appendChild(div);
-      }
+    
+    // 移除旧的操作按钮（状态变化时需要更新）
+    const oldActions = el.querySelector('.task-actions');
+    if (oldActions) oldActions.remove();
+    
+    // 根据状态添加操作按钮
+    const div = document.createElement('div');
+    div.className = 'task-actions';
+    if (t.status === 'queued' || t.status === 'processing') {
+      div.innerHTML = '<button class="stop" onclick="Queue.stopTask(\'' + t.task_id + '\')">⏹ 停止</button>';
+    } else if (t.status === 'completed') {
+      div.innerHTML = '<button onclick="Queue.downloadTask(\'' + t.task_id + '\')">下载</button>' +
+                      '<button class="delete" onclick="Queue.removeTask(\'' + t.task_id + '\')">删除</button>';
+    } else if (t.status === 'failed') {
+      div.innerHTML = '<button class="retry" onclick="Queue.retryTask(\'' + t.task_id + '\')">重试</button>' +
+                      '<button class="delete" onclick="Queue.removeTask(\'' + t.task_id + '\')">删除</button>';
     }
-    // 为 completed/failed 状态添加操作按钮
-    if (t.status === 'completed' || t.status === 'failed') {
-      if (!el.querySelector('.task-actions')) {
-        const div = document.createElement('div');
-        div.className = 'task-actions';
-        if (t.status === 'completed') div.innerHTML = '<button onclick="Queue.downloadTask(\'' + t.task_id + '\')">下载</button>';
-        if (t.status === 'failed') div.innerHTML += '<button class="retry" onclick="Queue.retryTask(\'' + t.task_id + '\')">重试</button>';
-        div.innerHTML += '<button class="delete" onclick="Queue.removeTask(\'' + t.task_id + '\')">删除</button>';
-        el.appendChild(div);
-      }
-    }
+    if (div.innerHTML) el.appendChild(div);
   };
 
   const updateBatchProgress = () => {

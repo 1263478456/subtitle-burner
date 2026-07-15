@@ -431,15 +431,33 @@ async def get_queue(user: str = Depends(require_auth)):
 
 @app.get("/api/download/{task_id}")
 async def download_result(task_id: str, user: str = Depends(require_auth)):
-    if task_id not in tasks:
-        raise HTTPException(404, "任务不存在")
-    task = tasks[task_id]
-    if task.get("user") != user:
-        raise HTTPException(403, "无权访问")
+    # 先查内存，再查数据库
+    task = tasks.get(task_id)
+    if not task:
+        rows = db_query("SELECT * FROM tasks WHERE task_id=? AND user=?", (task_id, user))
+        if not rows:
+            raise HTTPException(404, "任务不存在")
+        task = dict(rows[0])
+        if task.get('params'):
+            try: task['params'] = json.loads(task['params'])
+            except: pass
+    else:
+        if task.get("user") != user:
+            raise HTTPException(403, "无权访问")
     if task["status"] != "completed":
         raise HTTPException(400, "任务未完成")
-    file_path = Path(task["output_path"])
-    return FileResponse(file_path, media_type="video/mp4", filename=task["output_file"])
+    # 查找输出文件：先查内存中的路径，再 glob 搜索
+    file_path = None
+    if task.get("output_path") and Path(task["output_path"]).exists():
+        file_path = Path(task["output_path"])
+    else:
+        # 从 OUTPUT_DIR 搜索
+        candidates = list(OUTPUT_DIR.glob(f"{task_id}_*"))
+        if candidates:
+            file_path = candidates[0]
+    if not file_path or not file_path.exists():
+        raise HTTPException(404, "输出文件不存在")
+    return FileResponse(file_path, media_type="video/mp4", filename=task.get("output_file", file_path.name))
 
 @app.get("/api/history")
 async def list_history(user: str = Depends(require_auth), page: int = 1, page_size: int = 20):
