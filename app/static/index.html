@@ -241,7 +241,7 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" id="burnBtn" disabled onclick="Queue.startBurn()">🚀 开始烧录</button>
+        <button class="btn btn-primary" id="burnBtn" disabled onclick="if(!this.disabled) Queue.startBurn()">🚀 开始烧录</button>
         <button class="btn btn-ghost" onclick="resetForm()">重置</button>
       </div>
     </div>
@@ -295,7 +295,10 @@ const checkReady = () => {
     } else {
       ready = !!(window.Media && Media.hasPairs && Media.hasPairs());
     }
-    btn.disabled = !ready;
+    if (btn.disabled === ready) {
+      btn.disabled = !ready;
+      console.log('[checkReady] mode=' + window.mode + ' ready=' + ready + ' pairs=' + (window.Media ? Media.getPairs().length : 'N/A'));
+    }
   } catch (e) {
     console.error('checkReady error:', e);
   }
@@ -312,6 +315,11 @@ window.checkReady = checkReady;
 window.setCodecOptions = setCodecOptions;
 window.resetForm = resetForm;
 let me = null, gpuStatus = null;
+
+// 兜底轮询：每 500ms 强制同步一次按钮状态（防止任何回调遗漏）
+setInterval(() => {
+  if (typeof checkReady === 'function') checkReady();
+}, 500);
 
 // 初始化
 (async () => {
