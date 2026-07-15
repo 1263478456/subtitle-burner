@@ -295,13 +295,10 @@ const checkReady = () => {
     } else {
       ready = !!(window.Media && Media.hasPairs && Media.hasPairs());
     }
-    const shouldBeDisabled = !ready;
-    if (btn.disabled !== shouldBeDisabled) {
-      btn.disabled = shouldBeDisabled;
-      if (shouldBeDisabled) btn.classList.add('btn-disabled');
-      else btn.classList.remove('btn-disabled');
-      console.log('[checkReady] mode=' + window.mode + ' ready=' + ready + ' pairs=' + (window.Media ? Media.getPairs().length : 'N/A') + ' btn.disabled=' + btn.disabled);
-    }
+    // 直接设置按钮状态，不管之前是什么
+    btn.disabled = !ready;
+    if (!ready) btn.classList.add('btn-disabled');
+    else btn.classList.remove('btn-disabled');
   } catch (e) {
     console.error('checkReady error:', e);
   }
