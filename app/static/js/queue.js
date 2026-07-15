@@ -51,8 +51,9 @@ const Queue = (() => {
         const r = await fetch('/api/queue');
         if (!r.ok) return;
         const data = await r.json();
-        data.forEach(t => updateTaskUI(t));
-        if (data.every(t => t.status === 'completed' || t.status === 'failed')) {
+        const items = Array.isArray(data) ? data : (data.tasks || []);
+        items.forEach(t => updateTaskUI(t));
+        if (items.length && items.every(t => t.status === 'completed' || t.status === 'failed')) {
           clearInterval(pollTimer);
           pollTimer = null;
           // 批量完成，隐藏批量进度条

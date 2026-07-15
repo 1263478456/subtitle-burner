@@ -128,21 +128,14 @@ const Media = (() => {
           div.onclick = () => {
             if (isVid) selectedVideoMedia = (selectedVideoMedia === it.path) ? null : it.path;
             else selectedSubMedia = (selectedSubMedia === it.path) ? null : it.path;
-            Array.from(list.querySelectorAll('.media-item[data-type="video"]')).forEach(el => {
-              el.style.borderColor = (el.dataset.path === selectedVideoMedia) ? '#3b82f6' : '';
-            });
-            Array.from(list.querySelectorAll('.media-item[data-type="sub"]')).forEach(el => {
-              el.style.borderColor = (el.dataset.path === selectedSubMedia) ? '#8b5cf6' : '';
-            });
-            loadMedia(path);
             if (selectedVideoMedia && selectedSubMedia) {
               const vName = selectedVideoMedia.split('/').pop();
               const sName = selectedSubMedia.split('/').pop();
               addPair(selectedVideoMedia, vName, selectedSubMedia, sName);
               selectedVideoMedia = null;
               selectedSubMedia = null;
-              loadMedia(path);
             }
+            loadMedia(path);
           };
         }
       }
@@ -180,6 +173,10 @@ const Media = (() => {
       if (list && !list.querySelector('.media-item')) {
         loadMedia('');
       }
+      // 确保配对区域可见，并刷新按钮状态
+      const sec = $('#pairSection');
+      if (sec) sec.style.display = 'block';
+      if (typeof checkReady === 'function') checkReady();
     }
   };
 
