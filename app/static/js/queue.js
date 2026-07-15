@@ -1,5 +1,6 @@
 // queue.js — 任务轮询、进度更新与批量烧录
 const Queue = (() => {
+  const { $, toast } = Utils;
   let pollTimer = null;
   let batchTotal = 0;
   let batchCompleted = 0;
@@ -27,6 +28,7 @@ const Queue = (() => {
         const div = document.createElement('div');
         div.className = 'task-actions';
         if (t.status === 'completed') div.innerHTML = '<button onclick="Queue.downloadTask(\'' + t.task_id + '\')">download</button>';
+        if (t.status === 'failed') div.innerHTML += '<button class="retry" onclick="Queue.retryTask(\'' + t.task_id + '\')">retry</button>';
         div.innerHTML += '<button class="delete" onclick="Queue.removeTask(\'' + t.task_id + '\')">delete</button>';
         el.appendChild(div);
       }
@@ -105,7 +107,8 @@ const Queue = (() => {
   const batchBurn = async () => {
     const pairs = Media.getPairs();
     if (pairs.length === 0) return;
-    const btn = $('#batchBurnBtn');
+    const btn = $('#burnBtn');
+    const originalText = btn.textContent;
     btn.disabled = true;
     btn.textContent = 'Submitting...';
     batchTotal = pairs.length;
@@ -143,7 +146,7 @@ const Queue = (() => {
       batchCompleted++;
       updateBatchProgress();
     }
-    btn.textContent = 'Batch burn all pairs';
+    btn.textContent = originalText || 'Batch burn all pairs';
     btn.disabled = false;
     toast('Done: ' + ok + ' success, ' + fail + ' failed');
     if (ok > 0) pollTasks();
@@ -162,8 +165,30 @@ const Queue = (() => {
     }
   };
 
+  const retryTask = async (taskId) => {
+    try {
+      const r = await fetch('/api/retry/' + taskId, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Retry failed');
+      toast('Task ' + taskId + ' requeued');
+      // 更新本地 UI
+      const el = document.getElementById('task-' + taskId);
+      if (el) {
+        const statusEl = el.querySelector('.status');
+        statusEl.className = 'status queued';
+        statusEl.textContent = 'queued';
+        const pb = document.getElementById('pb-' + taskId);
+        if (pb) pb.style.width = '0%';
+        // 移除操作按钮（如果有）
+        const actions = el.querySelector('.task-actions');
+        if (actions) actions.remove();
+      }
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
   return {
     addLocalTask, updateTaskUI, pollTasks,
-    downloadTask, removeTask, startBurn, burnTask, batchBurn, clearCompleted
+    downloadTask, removeTask, startBurn, burnTask, batchBurn, clearCompleted, retryTask
   };
 })();

@@ -1,5 +1,6 @@
 // media.js — 媒体库浏览与配对逻辑
 const Media = (() => {
+  const { $, $$, toast } = Utils;
   let mediaPath = '';
   let selectedVideoMedia = null;
   let selectedSubMedia = null;
@@ -25,7 +26,7 @@ const Media = (() => {
       '<span class="vid" title="' + p.videoPath + '">V ' + p.videoName + '</span>' +
       '<span class="sep">+</span>' +
       '<span class="sub" title="' + p.subPath + '"> S ' + p.subName + '</span>' +
-      '<button class="del-pair" onclick="removePair(' + i + ')">x</button>' +
+      '<button class="del-pair" onclick="Media.removePair(' + i + ')">x</button>' +
       '</div>'
     ).join('');
     $('#burnBtn').disabled = (mediaPairs.length === 0);

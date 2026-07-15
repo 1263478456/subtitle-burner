@@ -1,5 +1,6 @@
 // auth.js — 认证与会话管理
 const Auth = (() => {
+  const { $, toast } = Utils;
   let currentUser = null;
 
   const getCurrentUser = () => currentUser;
@@ -27,7 +28,7 @@ const Auth = (() => {
   const init = async () => {
     const user = await checkAuth();
     if (user) {
-      const nameEl = document.getElementById('userName');
+      const nameEl = $('userName');
       if (nameEl) nameEl.textContent = ' user ' + user.user;
     }
   };

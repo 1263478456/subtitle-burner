@@ -48,7 +48,7 @@ jobs:
       dockerhub:  ${{ steps.pick.outputs.dockerhub }}
     steps:
       - name: Checkout
-        uses: actions/checkout@6929e7d00a01e2ce44069b5fd2a4e8c83b8e2c47  # v4.1.7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0   # need full history for changelog
 

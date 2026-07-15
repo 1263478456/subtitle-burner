@@ -258,17 +258,12 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 <div class="toast" id="toast"></div>
 
 <script src="/static/js/auth.js"></script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/auth.js"></script>
 <script src="/static/js/upload.js"></script>
 <script src="/static/js/media.js"></script>
 <script src="/static/js/queue.js"></script>
 <script>
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => document.querySelectorAll(s);
-const toast = (msg, kind) => {
-  const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + (kind || 'success');
-  setTimeout(() => t.classList.remove('show'), 3000);
-};
-
 const checkReady = () => {
   if (mode === 'upload') {
     $('#burnBtn').disabled = !Upload.isReady();

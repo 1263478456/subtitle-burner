@@ -1,5 +1,6 @@
 // upload.js — 文件上传与拖拽逻辑
 const Upload = (() => {
+  const { $, toast } = Utils;
   let videoFile = null;
   let subFile = null;
 
