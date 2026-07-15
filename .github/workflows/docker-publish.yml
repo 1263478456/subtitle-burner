@@ -3,6 +3,8 @@ name: docker-publish
 on:
   push:
     tags: ['v*.*.*']
+    paths:
+      - 'README.md'
   workflow_dispatch:
 
 permissions:
@@ -14,6 +16,17 @@ env:
   GHCR_REPOSITORY: ghcr.io/1263478456/subtitle-burner
 
 jobs:
+  update-description:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKERHUB_REPOSITORY }}
+          readme-filepath: ./README.md
+
   meta:
     runs-on: ubuntu-latest
     outputs:
