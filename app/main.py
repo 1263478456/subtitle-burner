@@ -171,6 +171,7 @@ async def run_burn_task(task_id):
         codec = params.get('codec', 'libx264')
 
         cmd = _build_ffmpeg_cmd(video_path, sub_path, output_path, params)
+        logger.info(f"[任务 {task_id}] 编码器: {codec}, FFmpeg 命令: {' '.join(cmd)}")
 
         # 获取视频总时长用于进度计算
         total_duration = 0
@@ -580,6 +581,7 @@ async def burn_from_media(
     keep_original_sub: bool = Form(False),
 ):
     """直接从媒体库添加烧录任务（不需要上传）"""
+    logger.info(f"[媒体库烧录] 用户: {user}, codec: {codec}, crf: {crf}, preset: {preset}, sub_mode: {sub_mode}")
     # 安全检查
     video_full = (MEDIA_ROOT / video_path).resolve()
     sub_full = (MEDIA_ROOT / subtitle_path).resolve()
