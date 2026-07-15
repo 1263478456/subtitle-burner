@@ -57,6 +57,10 @@ docker compose --profile gpu up -d
 - 📡 `/health` 健康探针 + OpenAPI 自动文档
 - ⚡ FFmpeg 实时进度解析，精确到秒
 - 🔄 失败任务自动重试，批量总进度条
+- ⏹ 任务停止功能，支持排队中和处理中的任务
+- 🎬 两种字幕模式：压制字幕（硬字幕）/ 添加字幕轨道（软字幕）
+- 📁 媒体库浏览，智能配对视频和字幕文件
+- 📥 输出文件命名：`源视频名(压制完成).mp4`
 
 ---
 
@@ -66,14 +70,99 @@ docker compose --profile gpu up -d
 |---|---|---|
 | `ADMIN_USERNAME` | 管理员账号 | `admin` |
 | `ADMIN_PASSWORD` | 管理员密码 | `changeme` |
-| `SECRET_KEY` | Session 加密密钥（≥32 字节） | - |
+| `SESSION_SECRET` | Session 加密密钥（≥32 字节） | - |
 | `BIND_HOST` | 绑定地址，IPv6 写 `[::]` | `0.0.0.0` |
 | `BIND_PORT` | 主机端口 | `8000` |
 | `MAX_CONCURRENT_TASKS` | 队列并行数 | `2` |
 | `MAX_FILE_SIZE_MB` | 单文件上传上限 | `2048` |
+| `MEDIA_ROOT` | 媒体库根目录（容器内路径） | `/media` |
 | `NVIDIA_VISIBLE_DEVICES` | GPU profile 使用哪几张卡 | `all` |
 
-> ⚠️ **安全提示**：生产环境务必修改 `ADMIN_PASSWORD` 与 `SECRET_KEY`。可用 `openssl rand -hex 32` 生成密钥。
+> ⚠️ **安全提示**：生产环境务必修改 `ADMIN_PASSWORD` 与 `SESSION_SECRET`。可用 `openssl rand -hex 32` 生成密钥。
+
+---
+
+## 🎬 字幕处理模式
+
+### 模式选择
+
+| 模式 | 说明 | 适用场景 |
+|---|---|---|
+| **压制字幕（硬字幕）** | 字幕烧录到视频画面中，无法关闭 | 需要永久显示字幕，兼容所有播放器 |
+| **添加字幕轨道（软字幕）** | 字幕作为独立轨道，可在播放器中开关 | 需要灵活控制字幕显示，保留原视频质量 |
+
+### 原字幕轨道处理
+
+- **删除原字幕**：移除视频中原有的字幕轨道（默认）
+- **保留原字幕**：保留视频中原有的字幕轨道，新字幕作为额外轨道添加
+
+> 💡 **软字幕模式**不需要重新编码视频，速度极快，但需要播放器支持字幕轨道切换。
+
+---
+
+## ⏹ 任务控制
+
+- **停止任务**：排队中和处理中的任务都可以点击"停止"按钮终止
+- **重试任务**：失败的任务可以点击"重试"按钮重新排队
+- **批量操作**：支持批量烧录，显示总进度条
+
+---
+
+## 🎮 GPU 编码
+
+### 支持的编码器
+
+| 编码器 | 说明 |
+|---|---|
+| `h264_nvenc` | NVIDIA H.264 硬件编码 |
+| `hevc_nvenc` | NVIDIA H.265/HEVC 硬件编码 |
+| `h264_qsv` | Intel Quick Sync H.264 编码 |
+
+### GPU 使用注意事项
+
+1. **需要 NVIDIA Container Toolkit**：确保主机已安装 `nvidia-docker2`
+2. **驱动版本要求**：主机 NVIDIA 驱动 ≥ 535（对应 CUDA 12.4）
+3. **编码器检测**：启动时会自动检测可用的硬件编码器，日志中会显示检测结果
+4. **字幕滤镜兼容**：使用 `subtitles` 滤镜时，视频解码在 CPU 进行，只有编码阶段使用 GPU
+
+### 验证 GPU 是否可用
+
+```bash
+# 检查容器内 ffmpeg 是否支持 NVENC
+docker exec subtitle-burner ffmpeg -hide_banner -encoders 2>/dev/null | grep nvenc
+
+# 检查 NVIDIA 驱动
+docker exec subtitle-burner nvidia-smi
+
+# 查看启动日志中的编码器检测结果
+docker logs subtitle-burner 2>&1 | grep "编码器检测"
+```
+
+### 常见问题
+
+**Q: 选择 GPU 编码器但实际使用了 CPU？**
+A: 检查容器日志中的编码器检测结果。如果显示 `h264_nvenc: False`，说明容器内 ffmpeg 不支持 NVENC。确保使用 `latest-gpu` 镜像。
+
+**Q: GPU 编码失败？**
+A: 可能原因：
+- NVIDIA 驱动版本过低
+- 容器没有正确挂载 GPU 设备
+- 视频文件路径包含特殊字符
+
+---
+
+## 📁 媒体库模式
+
+支持直接浏览服务器上的媒体文件，无需上传：
+
+1. 点击"📁 从媒体库选择"切换到媒体库模式
+2. 浏览目录，选择视频和字幕文件
+3. 支持手动配对或"智能匹配"（按文件名自动配对）
+4. 支持批量配对和批量烧录
+
+**智能匹配规则**：
+- 视频和字幕文件名（去掉扩展名）相同则自动配对
+- 支持语言后缀匹配（如 `video.zh.srt` 匹配 `video.mp4`）
 
 ---
 
@@ -95,7 +184,8 @@ docker compose --profile gpu up -d
 ssh root@truenas.local
 
 # 2. 创建数据集目录
-mkdir -p /mnt/pool/apps/subtitle-burner/data/{uploads,outputs,fonts,db}
+mkdir -p /mnt/pool/apps/subtitle-burner/data/{input,output,fonts,db}
+mkdir -p /mnt/pool/apps/subtitle-burner/media
 cd /mnt/pool/apps/subtitle-burner
 
 # 3. 写入 docker-compose.yml 与 .env
@@ -114,12 +204,43 @@ docker compose up -d
 - 多架构支持：`linux/amd64` + `linux/arm64`
 
 镜像标签：
-- `1263478456/subtitle-burner:latest` — 最新 release
-- `1263478456/subtitle-burner:v3.0.8` — 语义化版本
-- `ghcr.io/1263478456/subtitle-burner:v3.0.8` — GHCR 同步
+- `1263478456/subtitle-burner:latest` — 最新 CPU 版本
+- `1263478456/subtitle-burner:latest-gpu` — 最新 GPU 版本
+- `1263478456/subtitle-burner:v3.x.x` — 语义化版本
+- `ghcr.io/1263478456/subtitle-burner:v3.x.x` — GHCR 同步
 
 ---
 
-## 📖 完整文档 / Full Documentation
+## 📖 API 文档
 
-详见 [GitHub README](https://github.com/1263478456/subtitle-burner#readme)。
+启动后访问 `/docs` 查看 Swagger UI 自动文档。
+
+主要 API 端点：
+- `POST /api/upload` — 上传视频和字幕
+- `POST /api/burn` — 提交烧录任务
+- `POST /api/media/burn` — 从媒体库提交任务
+- `POST /api/stop/{task_id}` — 停止任务
+- `POST /api/retry/{task_id}` — 重试任务
+- `GET /api/queue` — 查看任务队列
+- `GET /api/download/{task_id}` — 下载输出文件
+- `GET /api/gpu/status` — 查询 GPU 状态
+
+---
+
+## 📝 更新日志
+
+### v3.0.24+
+- ✅ 修复下载功能（支持服务重启后下载历史任务）
+- ✅ 修复历史记录页面按钮样式
+- ✅ 新增任务停止功能（排队中/处理中均可停止）
+- ✅ 新增字幕处理模式选择（压制字幕 / 添加字幕轨道）
+- ✅ 新增原字幕轨道保留选项
+- ✅ 输出文件命名改为 `源视频名(压制完成).mp4`
+- ✅ 修复 GPU 编码参数（移除无效的 `-hwaccel cuda`，修复 NVENC 预设映射）
+- ✅ 修复 uvicorn 多 worker 导致的内存不共享问题
+
+---
+
+## 📄 License
+
+MIT License
