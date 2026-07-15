@@ -11,7 +11,6 @@ permissions:
 
 env:
   DOCKERHUB_REPOSITORY: 1263478456/subtitle-burner
-  GHCR_REPOSITORY: ghcr.io/1263478456/subtitle-burner
 
 jobs:
   meta:
@@ -27,9 +26,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.DOCKERHUB_REPOSITORY }}
-            ${{ env.GHCR_REPOSITORY }}
+          images: ${{ env.DOCKERHUB_REPOSITORY }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -65,12 +62,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Append architecture suffix to tags
         id: tags
         env:
@@ -86,7 +77,7 @@ jobs:
           printf '%s' "$result" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v5
+      - uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -106,17 +97,11 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create multi-arch manifests
         env:
           RAW_TAGS: ${{ needs.meta.outputs.tags }}
           DH: ${{ env.DOCKERHUB_REPOSITORY }}
-          GHC: ${{ env.GHCR_REPOSITORY }}
         run: |
           while IFS= read -r tag; do
             [ -z "$tag" ] && continue
@@ -124,7 +109,5 @@ jobs:
             echo "merge: $DH:$short_tag"
             docker buildx imagetools create -t "$DH:$short_tag" \
               "$DH:${short_tag}-amd64" "$DH:${short_tag}-arm64" || true
-            docker buildx imagetools create -t "$GHC:$short_tag" \
-              "$GHC:${short_tag}-amd64" "$GHC:${short_tag}-arm64" || true
           done <<< "$RAW_TAGS"
           echo "merge done"
