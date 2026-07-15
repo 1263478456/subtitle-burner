@@ -30,13 +30,23 @@ const Queue = (() => {
     statusEl.textContent = t.status === 'processing' ? 'processing ' + (t.progress || 0) + '%' : t.status;
     const pb = document.getElementById('pb-' + t.task_id);
     if (pb) pb.style.width = (t.progress || 0) + '%';
+    // 为 processing 状态添加停止按钮
+    if (t.status === 'processing') {
+      if (!el.querySelector('.task-actions')) {
+        const div = document.createElement('div');
+        div.className = 'task-actions';
+        div.innerHTML = '<button class="stop" onclick="Queue.stopTask(\'' + t.task_id + '\')">⏹ 停止</button>';
+        el.appendChild(div);
+      }
+    }
+    // 为 completed/failed 状态添加操作按钮
     if (t.status === 'completed' || t.status === 'failed') {
       if (!el.querySelector('.task-actions')) {
         const div = document.createElement('div');
         div.className = 'task-actions';
-        if (t.status === 'completed') div.innerHTML = '<button onclick="Queue.downloadTask(\'' + t.task_id + '\')">download</button>';
-        if (t.status === 'failed') div.innerHTML += '<button class="retry" onclick="Queue.retryTask(\'' + t.task_id + '\')">retry</button>';
-        div.innerHTML += '<button class="delete" onclick="Queue.removeTask(\'' + t.task_id + '\')">delete</button>';
+        if (t.status === 'completed') div.innerHTML = '<button onclick="Queue.downloadTask(\'' + t.task_id + '\')">下载</button>';
+        if (t.status === 'failed') div.innerHTML += '<button class="retry" onclick="Queue.retryTask(\'' + t.task_id + '\')">重试</button>';
+        div.innerHTML += '<button class="delete" onclick="Queue.removeTask(\'' + t.task_id + '\')">删除</button>';
         el.appendChild(div);
       }
     }
@@ -190,7 +200,7 @@ const Queue = (() => {
     try {
       const r = await fetch('/api/retry/' + taskId, { method: 'POST' });
       if (!r.ok) throw new Error((await r.json()).detail || 'Retry failed');
-      toast('Task ' + taskId + ' requeued');
+      toast('任务已重新排队');
       // 更新本地 UI
       const el = document.getElementById('task-' + taskId);
       if (el) {
@@ -208,9 +218,37 @@ const Queue = (() => {
     }
   };
 
+  const stopTask = async (taskId) => {
+    if (!confirm('确定要停止这个任务吗？')) return;
+    try {
+      const r = await fetch('/api/stop/' + taskId, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json()).detail || 'Stop failed');
+      toast('任务已停止');
+      // 更新本地 UI
+      const el = document.getElementById('task-' + taskId);
+      if (el) {
+        const statusEl = el.querySelector('.status');
+        statusEl.className = 'status failed';
+        statusEl.textContent = 'stopped';
+        const pb = document.getElementById('pb-' + taskId);
+        if (pb) pb.style.width = '0%';
+        // 移除操作按钮并重新渲染
+        const actions = el.querySelector('.task-actions');
+        if (actions) actions.remove();
+        // 添加重试和删除按钮
+        const div = document.createElement('div');
+        div.className = 'task-actions';
+        div.innerHTML = '<button class="retry" onclick="Queue.retryTask(\'' + taskId + '\')">重试</button><button class="delete" onclick="Queue.removeTask(\'' + taskId + '\')">删除</button>';
+        el.appendChild(div);
+      }
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
   return {
     addLocalTask, updateTaskUI, pollTasks,
-    downloadTask, removeTask, startBurn, burnTask, batchBurn, clearCompleted, retryTask
+    downloadTask, removeTask, startBurn, burnTask, batchBurn, clearCompleted, retryTask, stopTask
   };
 })();
 

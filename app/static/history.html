@@ -7,8 +7,8 @@
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg: #f8fafc; --panel: #ffffff; --border: #1e293b;
-  --text: #1e293b; --muted: #94a3b8; --dim: #94a3b8;
+  --bg: #f8fafc; --panel: #ffffff; --border: #e2e8f0;
+  --text: #1e293b; --muted: #64748b; --dim: #94a3b8;
   --primary: #3b82f6; --purple: #8b5cf6;
   --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
 }
@@ -56,10 +56,11 @@ tr:hover td { background: #f1f5f9; }
 .status.processing { background: #dbeafe; color: #3b82f6; }
 .status.completed { background: #d1fae5; color: var(--ok); }
 .status.failed { background: #fee2e2; color: var(--err); }
-.act-btn { padding: 4px 10px; background: var(--border); border: none;
+.act-btn { padding: 4px 10px; background: #f1f5f9; border: 1px solid var(--border);
            border-radius: 4px; color: var(--text); cursor: pointer; font-size: 12px; margin-right: 4px; }
-.act-btn:hover { background: var(--primary); }
-.act-btn.del:hover { background: var(--err); }
+.act-btn:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
+.act-btn.del { color: var(--err); border-color: var(--err); }
+.act-btn.del:hover { background: var(--err); color: #fff; }
 .pager { display: flex; justify-content: center; gap: 6px; margin-top: 16px; }
 .pager button { padding: 6px 12px; background: #f1f5f9; border: 1px solid var(--border);
                 color: var(--text); border-radius: 4px; cursor: pointer; font-size: 12px; }

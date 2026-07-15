@@ -62,6 +62,7 @@ serializer = URLSafeTimedSerializer(SESSION_SECRET, salt="subtitle-burner-auth")
 
 tasks = {}
 queue = asyncio.Queue()
+running_processes = {}  # task_id -> subprocess process
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -169,6 +170,7 @@ async def run_burn_task(task_id):
             total_duration = 0
 
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        running_processes[task_id] = process
 
         # 实时解析 stderr 更新进度
         async def read_stderr():
@@ -198,6 +200,7 @@ async def run_burn_task(task_id):
         stderr_task = asyncio.create_task(read_stderr())
         await process.wait()
         stderr_task.cancel()
+        running_processes.pop(task_id, None)
 
         if process.returncode != 0 or not output_path.exists():
             raise Exception("FFmpeg 执行失败")
@@ -369,6 +372,46 @@ async def retry_task(task_id: str, user: str = Depends(require_auth)):
                ("queued", 0, None, None, now, task_id))
     await queue.put(task_id)
     return {"task_id": task_id, "status": "queued", "queue_size": queue.qsize()}
+
+@app.post("/api/stop/{task_id}")
+async def stop_task(task_id: str, user: str = Depends(require_auth)):
+    """停止正在执行的任务"""
+    if task_id not in tasks:
+        raise HTTPException(404, "任务不存在")
+    task = tasks[task_id]
+    if task.get("user") != user:
+        raise HTTPException(403, "无权访问")
+    
+    # 如果任务正在执行中，终止 FFmpeg 进程
+    process = running_processes.get(task_id)
+    if process:
+        try:
+            process.terminate()
+            await asyncio.sleep(0.5)
+            if process.returncode is None:
+                process.kill()
+        except Exception:
+            pass
+        running_processes.pop(task_id, None)
+    
+    # 清理输出文件
+    output_files = list(OUTPUT_DIR.glob(f"{task_id}_*"))
+    for f in output_files:
+        try:
+            f.unlink()
+        except Exception:
+            pass
+    
+    now = datetime.now().isoformat()
+    tasks[task_id].update({
+        "status": "failed",
+        "error": "用户手动停止",
+        "completed_at": now,
+    })
+    db_execute("UPDATE tasks SET status=?, error=?, completed_at=? WHERE task_id=?",
+               ("failed", "用户手动停止", now, task_id))
+    
+    return {"task_id": task_id, "status": "stopped"}
 
 @app.get("/api/status/{task_id}")
 async def get_task_status(task_id: str, user: str = Depends(require_auth)):
@@ -619,29 +662,40 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         vf_parts[0] += f":force_style='{s}'"
     vf = ",".join(vf_parts)
     
+    # NVENC 预设映射
+    nvenc_preset_map = {
+        "ultrafast": "p1", "superfast": "p2", "veryfast": "p3",
+        "faster": "p4", "fast": "p4", "medium": "p5",
+        "slow": "p6", "veryslow": "p7"
+    }
+    nvenc_preset = nvenc_preset_map.get(preset, "p5")
+    
     # GPU 编码特殊处理
+    # 注意：使用 subtitles 滤镜时不能用 -hwaccel cuda（会导致滤镜失败）
+    # 必须让 FFmpeg 在 CPU 解码后应用字幕滤镜，再用 GPU 编码
     if codec == "h264_nvenc":
         return [
-            "ffmpeg", "-y", "-hwaccel", "cuda", "-i", str(video_path),
+            "ffmpeg", "-y", "-i", str(video_path),
             "-vf", vf, "-c:v", "h264_nvenc",
-            "-preset", "p4" if preset == "medium" else preset,
+            "-preset", nvenc_preset,
             "-rc", "vbr", "-cq", str(crf),
-            "-b:v", "0", "-c:a", "copy",
+            "-c:a", "copy",
             "-map", "0:v:0", "-map", "0:a?",
             str(output_path)
         ]
     elif codec == "hevc_nvenc":
         return [
-            "ffmpeg", "-y", "-hwaccel", "cuda", "-i", str(video_path),
+            "ffmpeg", "-y", "-i", str(video_path),
             "-vf", vf, "-c:v", "hevc_nvenc",
-            "-preset", "p4", "-rc", "vbr", "-cq", str(crf),
+            "-preset", nvenc_preset,
+            "-rc", "vbr", "-cq", str(crf),
             "-c:a", "copy",
             "-map", "0:v:0", "-map", "0:a?",
             str(output_path)
         ]
     elif codec == "h264_qsv":
         return [
-            "ffmpeg", "-y", "-hwaccel", "qsv", "-i", str(video_path),
+            "ffmpeg", "-y", "-i", str(video_path),
             "-vf", vf, "-c:v", "h264_qsv",
             "-preset", "medium", "-global_quality", str(crf),
             "-c:a", "copy",
