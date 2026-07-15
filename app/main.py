@@ -220,7 +220,16 @@ async def run_burn_task(task_id):
         running_processes.pop(task_id, None)
 
         if process.returncode != 0 or not output_path.exists():
-            raise Exception("FFmpeg 执行失败")
+            # 收集 FFmpeg 错误信息
+            stderr_output = ""
+            try:
+                # 尝试读取剩余的 stderr
+                remaining = await process.stderr.read()
+                stderr_output = remaining.decode("utf-8", errors="ignore")[-500:]
+            except:
+                pass
+            logger.error(f"[任务 {task_id}] FFmpeg 失败 (returncode={process.returncode}): {stderr_output}")
+            raise Exception(f"FFmpeg 执行失败 (code={process.returncode}): {stderr_output[:200]}")
 
         out_size = output_path.stat().st_size
         tasks[task_id].update({"status": "completed", "progress": 100,
