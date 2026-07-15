@@ -189,6 +189,9 @@ async def run_burn_task(task_id):
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         running_processes[task_id] = process
 
+        # 收集 stderr 输出用于错误诊断
+        stderr_lines = []
+
         # 实时解析 stderr 更新进度
         async def read_stderr():
             nonlocal process
@@ -198,6 +201,10 @@ async def run_burn_task(task_id):
                 if not line:
                     break
                 line_str = line.decode("utf-8", errors="ignore").strip()
+                stderr_lines.append(line_str)
+                # 保留最后 50 行
+                if len(stderr_lines) > 50:
+                    stderr_lines.pop(0)
                 # 解析 time= 字段
                 if "time=" in line_str and total_duration > 0:
                     try:
@@ -220,16 +227,10 @@ async def run_burn_task(task_id):
         running_processes.pop(task_id, None)
 
         if process.returncode != 0 or not output_path.exists():
-            # 收集 FFmpeg 错误信息
-            stderr_output = ""
-            try:
-                # 尝试读取剩余的 stderr
-                remaining = await process.stderr.read()
-                stderr_output = remaining.decode("utf-8", errors="ignore")[-500:]
-            except:
-                pass
-            logger.error(f"[任务 {task_id}] FFmpeg 失败 (returncode={process.returncode}): {stderr_output}")
-            raise Exception(f"FFmpeg 执行失败 (code={process.returncode}): {stderr_output[:200]}")
+            # 使用收集的 stderr 输出
+            stderr_output = "\n".join(stderr_lines[-30:])
+            logger.error(f"[任务 {task_id}] FFmpeg 失败 (returncode={process.returncode}):\n{stderr_output}")
+            raise Exception(f"FFmpeg 执行失败 (code={process.returncode}): {stderr_output[:300]}")
 
         out_size = output_path.stat().st_size
         tasks[task_id].update({"status": "completed", "progress": 100,
@@ -745,7 +746,8 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     if codec == "h264_nvenc":
         return [
             "ffmpeg", "-y", "-i", str(video_path),
-            "-vf", vf, "-c:v", "h264_nvenc",
+            "-vf", vf, "-pix_fmt", "yuv420p",
+            "-c:v", "h264_nvenc",
             "-preset", nvenc_preset,
             "-rc", "vbr", "-cq", str(crf),
             "-c:a", "copy",
@@ -755,7 +757,8 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     elif codec == "hevc_nvenc":
         return [
             "ffmpeg", "-y", "-i", str(video_path),
-            "-vf", vf, "-c:v", "hevc_nvenc",
+            "-vf", vf, "-pix_fmt", "yuv420p",
+            "-c:v", "hevc_nvenc",
             "-preset", nvenc_preset,
             "-rc", "vbr", "-cq", str(crf),
             "-c:a", "copy",
@@ -765,7 +768,8 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     elif codec == "h264_qsv":
         return [
             "ffmpeg", "-y", "-i", str(video_path),
-            "-vf", vf, "-c:v", "h264_qsv",
+            "-vf", vf, "-pix_fmt", "yuv420p",
+            "-c:v", "h264_qsv",
             "-preset", "medium", "-global_quality", str(crf),
             "-c:a", "copy",
             "-map", "0:v:0", "-map", "0:a?",
