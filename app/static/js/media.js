@@ -53,7 +53,7 @@ const Media = (() => {
       crf: $('#crf').value, preset: $('#preset').value,
       codec: $('#codec').value, style: $('#style').value
     });
-    // 强制把 mode 切到 media
+    // 强制把 mode 切到 media（不管之前是什么状态）
     window.mode = 'media';
     const uploadBtn = $('#tab-upload');
     const mediaBtn = $('#tab-media');
@@ -64,6 +64,7 @@ const Media = (() => {
     if (uploadArea) uploadArea.style.display = 'none';
     if (mediaArea) mediaArea.style.display = 'block';
     updatePairUI();
+    // 显式再调一次 checkReady（防止 updatePairUI 因闭包时机问题失效）
     if (window.checkReady) {
       try { window.checkReady(); } catch (e) { console.error('checkReady error:', e); }
     }
@@ -113,8 +114,16 @@ const Media = (() => {
         }
       });
     });
-    // 关键修复：强制把 mode 切到 media
+    // 强制把 mode 切到 media（不管之前是什么状态）
     window.mode = 'media';
+    const uploadBtn = $('#tab-upload');
+    const mediaBtn = $('#tab-media');
+    const uploadArea = $('#tab-upload-area');
+    const mediaArea = $('#tab-media-area');
+    if (uploadBtn) uploadBtn.classList.remove('active');
+    if (mediaBtn) mediaBtn.classList.add('active');
+    if (uploadArea) uploadArea.style.display = 'none';
+    if (mediaArea) mediaArea.style.display = 'block';
     updatePairUI();
     if (window.checkReady) window.checkReady();
     if (added > 0) toast('Smart paired: ' + added + ' pair(s)');
@@ -226,4 +235,3 @@ const Media = (() => {
 
 // 挂载到全局作用域，因为 HTML onclick 直接调用 setTab
 window.setTab = Media.setTab;
-window.Media = Media;
