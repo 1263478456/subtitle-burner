@@ -76,3 +76,5 @@ const Upload = (() => {
 
   return { setupDrop, setVideoFile, setSubFile, isReady, reset, getVideoFile, getSubFile };
 })();
+
+window.Upload = Upload;

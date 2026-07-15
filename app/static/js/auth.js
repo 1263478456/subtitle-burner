@@ -42,3 +42,5 @@ const Auth = (() => {
 
   return { getCurrentUser, checkAuth, logout, init };
 })();
+
+window.Auth = Auth;

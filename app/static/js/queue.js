@@ -213,3 +213,5 @@ const Queue = (() => {
     downloadTask, removeTask, startBurn, burnTask, batchBurn, clearCompleted, retryTask
   };
 })();
+
+window.Queue = Queue;
