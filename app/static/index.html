@@ -129,6 +129,20 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 .selection-indicator .tag.vid { background: #dbeafe; color: #3b82f6; }
 .selection-indicator .tag.sub { background: #ede9fe; color: #8b5cf6; }
 .selection-indicator .tag.none { color: var(--dim); }
+.batch-progress { margin-top: 12px; padding: 12px; background: #f1f5f9; border-radius: 6px; }
+.batch-progress-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.batch-progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.batch-progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--purple));
+                        width: 0%; transition: width 0.3s; border-radius: 4px; }
+.task-actions .retry { border-color: var(--warn); color: var(--warn); }
+.task-actions .retry:hover { background: var(--warn); color: #fff; }
+.batch-progress { margin-top: 12px; padding: 12px; background: #f1f5f9; border-radius: 6px; }
+.batch-progress-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.batch-progress-bar { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.batch-progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--purple));
+                        width: 0%; transition: width 0.3s; border-radius: 4px; }
+.task-actions .retry { border-color: var(--warn); color: var(--warn); }
+.task-actions .retry:hover { background: var(--warn); color: #fff; }
 </style>
 </head>
 <body>
@@ -140,7 +154,7 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
   </nav>
   <div class="user">
     <span id="userName"></span>
-    <button onclick="logout()">退出</button>
+    <button onclick="Auth.logout()">退出</button>
   </div>
 </header>
 
@@ -175,6 +189,16 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
         <div class="breadcrumb" id="mediaBreadcrumb">📁 /</div>
         <div class="media-list" id="mediaList">
           <div class="empty">加载中...</div>
+        </div>
+        <div class="pair-section-wrap" id="pairSection" style="display:none">
+          <div class="pair-top">
+            <span class="pair-top-title">配对列表 (<span id="pairCount">0</span>)</span>
+            <div class="pair-top-btns">
+              <button class="btn-sm pair" onclick="Media.smartPair()">智能匹配</button>
+              <button class="btn-sm outline" onclick="Media.clearAllPairs()">清空</button>
+            </div>
+          </div>
+          <div class="pair-list" id="pairList"></div>
         </div>
       </div>
 
@@ -214,7 +238,7 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" id="burnBtn" disabled onclick="startBurn()">🚀 开始烧录</button>
+        <button class="btn btn-primary" id="burnBtn" disabled onclick="Queue.startBurn()">🚀 开始烧录</button>
         <button class="btn btn-ghost" onclick="resetForm()">重置</button>
       </div>
     </div>
@@ -224,146 +248,32 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
       <div class="task-list" id="taskList">
         <div class="empty">暂无任务</div>
       </div>
+      <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
+        <button class="btn btn-ghost" style="font-size:12px; padding:6px 12px;" onclick="Queue.clearCompleted()">清空已完成</button>
+      </div>
     </div>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/upload.js"></script>
+<script src="/static/js/media.js"></script>
+<script src="/static/js/queue.js"></script>
 <script>
-let me = null, gpuStatus = null;
-let mode = 'upload';
-let videoFile = null, subFile = null;
-let pickedVideo = null, pickedSub = null;
-let mediaPath = '';
-let selectedVideoMedia = null, selectedSubMedia = null;
-let pollTimer = null;
-let mediaPairs = [];
-
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
-
-const fmtSize = (b) => {
-  if (!b) return '-';
-  const u = ['B','KB','MB','GB']; let i = 0;
-  while (b >= 1024 && i < u.length-1) { b /= 1024; i++; }
-  return b.toFixed(1) + ' ' + u[i];
-};
-
 const toast = (msg, kind) => {
-  const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + (kind||'success');
+  const t = $('#toast'); t.textContent = msg; t.className = 'toast show ' + (kind || 'success');
   setTimeout(() => t.classList.remove('show'), 3000);
-};
-
-const setupDrop = (dropEl, onFile) => {
-  const input = dropEl.querySelector('input');
-  dropEl.addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('dragover'); });
-  dropEl.addEventListener('dragleave', () => dropEl.classList.remove('dragover'));
-  dropEl.addEventListener('drop', e => { e.preventDefault(); dropEl.classList.remove('dragover'); const f = e.dataTransfer.files[0]; if (f) onFile(f); });
-  dropEl.addEventListener('click', () => input.click());
-  input.addEventListener('change', () => { const f = input.files[0]; if (f) onFile(f); });
 };
 
 const checkReady = () => {
   if (mode === 'upload') {
-    $('#burnBtn').disabled = !(videoFile && subFile);
+    $('#burnBtn').disabled = !Upload.isReady();
   }
 };
-
-const updatePairUI = () => {
-  const sec = $('#pairSection');
-  if (!sec) return;
-  const cnt = $('#pairCount');
-  const list = $('#pairList');
-  sec.style.display = (mode === 'media' && mediaPairs.length > 0) ? 'block' : 'none';
-  cnt.textContent = mediaPairs.length;
-  list.innerHTML = mediaPairs.map((p, i) =>
-    '<div class="pair-row">' +
-    '<span class="vid" title="' + p.videoPath + '">V ' + p.videoName + '</span>' +
-    '<span class="sep">+</span>' +
-    '<span class="sub" title="' + p.subPath + '"> S ' + p.subName + '</span>' +
-    '<button class="del-pair" onclick="removePair(' + i + ')">x</button>' +
-    '</div>'
-  ).join('');
-  $('#burnBtn').disabled = (mediaPairs.length === 0);
-};
-
-const addPair = (videoPath, videoName, subPath, subName) => {
-  const dup = mediaPairs.find(p => p.videoPath === videoPath && p.subPath === subPath);
-  if (dup) return;
-  mediaPairs.push({ videoPath, videoName, subPath, subName, crf: $('#crf').value, preset: $('#preset').value, codec: $('#codec').value, style: $('#style').value });
-  updatePairUI();
-  toast('Paired: ' + videoName + ' + ' + subName);
-};
-
-const removePair = (i) => { mediaPairs.splice(i, 1); updatePairUI(); };
-const clearPairs = () => { mediaPairs = []; selectedVideoMedia = null; selectedSubMedia = null; updatePairUI(); };
-
-const smartPair = () => {
-  const items = Array.from($$('.media-item[data-type]'));
-  const videos = items.filter(el => el.dataset.type === 'video');
-  const subs = items.filter(el => el.dataset.type === 'sub');
-  let added = 0;
-  videos.forEach(vEl => {
-    const vPath = vEl.dataset.path;
-    const vName = vPath.split('/').pop();
-    const vBase = vName.replace(/\.[^.]+$/, '');
-    subs.forEach(sEl => {
-      const sPath = sEl.dataset.path;
-      const sName = sPath.split('/').pop();
-      const sBase = sName.replace(/\.[^.]+$/, '');
-      if (vBase === sBase && !mediaPairs.find(p => p.videoPath === vPath && p.subPath === sPath)) {
-        mediaPairs.push({ videoPath: vPath, videoName: vName, subPath: sPath, subName: sName, crf: $('#crf').value, preset: $('#preset').value, codec: $('#codec').value, style: $('#style').value });
-        added++;
-      }
-    });
-  });
-  updatePairUI();
-  if (added > 0) toast('Smart paired: ' + added + ' pairs');
-  else toast('No matching pairs found', 'error');
-};
-
-const batchBurn = async () => {
-  if (mediaPairs.length === 0) return;
-  const btn = $('#batchBurnBtn');
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
-  let ok = 0, fail = 0;
-  for (const p of mediaPairs) {
-    try {
-      const fd = new FormData();
-      fd.append('video_path', p.videoPath);
-      fd.append('subtitle_path', p.subPath);
-      fd.append('crf', p.crf);
-      fd.append('preset', p.preset);
-      fd.append('codec', p.codec);
-      fd.append('style', p.style);
-      const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
-      if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
-      const data = await r.json();
-      addLocalTask(data.task_id, data.video_name);
-      ok++;
-    } catch (e) { fail++; }
-  }
-  btn.textContent = 'Batch burn all pairs';
-  btn.disabled = false;
-  toast('Done: ' + ok + ' success, ' + fail + ' failed');
-  if (ok > 0) pollTasks();
-};
-
-setupDrop($('#videoDrop'), (f) => {
-  videoFile = f; $('#videoDrop').classList.add('has-file');
-  $('#videoInfo').style.display = 'block';
-  $('#videoInfo').textContent = f.name + ' (' + fmtSize(f.size) + ')';
-  checkReady();
-});
-
-setupDrop($('#subDrop'), (f) => {
-  subFile = f; $('#subDrop').classList.add('has-file');
-  $('#subInfo').style.display = 'block';
-  $('#subInfo').textContent = f.name + ' (' + fmtSize(f.size) + ')';
-  checkReady();
-});
 
 const setTab = (t) => {
   mode = t;
@@ -371,8 +281,8 @@ const setTab = (t) => {
   $('#tab-media').classList.toggle('active', t === 'media');
   $('#tab-upload-area').style.display = t === 'upload' ? 'block' : 'none';
   $('#tab-media-area').style.display = t === 'media' ? 'block' : 'none';
-  if (t === 'upload') { pickedVideo = pickedSub = null; checkReady(); }
-  if (t === 'media') loadMedia();
+  if (t === 'upload') { checkReady(); }
+  if (t === 'media') Media.loadMedia();
 };
 
 const setCodecOptions = (gpu) => {
@@ -383,167 +293,23 @@ const setCodecOptions = (gpu) => {
   });
 };
 
-const loadMedia = async (path) => {
-  path = path || '';
-  mediaPath = path;
-  const r = await fetch('/api/media/list?path=' + encodeURIComponent(path));
-  if (!r.ok) { toast((await r.json()).detail, 'error'); return; }
-  const data = await r.json();
-  $('#mediaBreadcrumb').textContent = ' /' + (data.current_path || '');
-  const list = $('#mediaList');
-  list.innerHTML = '';
-  if (!data.items.length) { list.innerHTML = '<div class="empty">empty</div>'; return; }
-
-  const mediaArea = $('#tab-media-area');
-  const oldInd = mediaArea.querySelector('.selection-indicator');
-  if (oldInd) oldInd.remove();
-
-  let indHtml = '';
-  if (selectedVideoMedia) indHtml += '<span class="tag vid">V: ' + selectedVideoMedia.split('/').pop() + '</span>';
-  if (selectedSubMedia) indHtml += '<span class="tag sub"> S: ' + selectedSubMedia.split('/').pop() + '</span>';
-  if (!selectedVideoMedia && !selectedSubMedia) indHtml = '<span class="tag none">Click video then subtitle to pair</span>';
-
-  const indDiv = document.createElement('div');
-  indDiv.className = 'selection-indicator';
-  indDiv.innerHTML = indHtml;
-  mediaArea.insertBefore(indDiv, mediaArea.firstChild);
-
-  data.items.forEach(it => {
-    const div = document.createElement('div');
-    div.className = 'media-item';
-    if (it.is_dir) {
-      div.innerHTML = '<span class="ic">DIR</span><div class="nm">' + it.name + '</div>';
-      div.onclick = () => loadMedia(it.path);
-    } else {
-      const ext = it.ext;
-      const isVid = ['.mp4','.mkv','.avi','.mov','.flv','.webm','.ts','.m4v','.mpg','.mpeg'].includes(ext);
-      const isSub = ['.srt','.vtt','.ass','.ssa','.sub'].includes(ext);
-      div.dataset.path = it.path;
-      div.dataset.type = isVid ? 'video' : isSub ? 'sub' : 'other';
-      div.innerHTML = '<span class="ic">' + (isVid ? 'V' : isSub ? 'S' : 'F') + '</span><div class="nm">' + it.name + '</div><div class="sz">' + fmtSize(it.size) + '</div>';
-      if (isVid && it.path === selectedVideoMedia) div.style.borderColor = '#3b82f6';
-      if (isSub && it.path === selectedSubMedia) div.style.borderColor = '#8b5cf6';
-      if (isVid || isSub) {
-        div.onclick = () => {
-          if (isVid) selectedVideoMedia = (selectedVideoMedia === it.path) ? null : it.path;
-          else selectedSubMedia = (selectedSubMedia === it.path) ? null : it.path;
-          Array.from(list.querySelectorAll('.media-item[data-type="video"]')).forEach(el => {
-            el.style.borderColor = (el.dataset.path === selectedVideoMedia) ? '#3b82f6' : '';
-          });
-          Array.from(list.querySelectorAll('.media-item[data-type="sub"]')).forEach(el => {
-            el.style.borderColor = (el.dataset.path === selectedSubMedia) ? '#8b5cf6' : '';
-          });
-          loadMedia(path);
-          if (selectedVideoMedia && selectedSubMedia) {
-            const vName = selectedVideoMedia.split('/').pop();
-            const sName = selectedSubMedia.split('/').pop();
-            addPair(selectedVideoMedia, vName, selectedSubMedia, sName);
-            selectedVideoMedia = null;
-            selectedSubMedia = null;
-            loadMedia(path);
-          }
-        };
-      }
-    }
-    list.appendChild(div);
-  });
-  updatePairUI();
-};
-
-const startBurn = async () => {
-  const btn = $('#burnBtn'); btn.disabled = true;
-  try {
-    if (mode === 'upload') {
-      const fd = new FormData();
-      fd.append('video', videoFile); fd.append('subtitle', subFile);
-      const upRes = await fetch('/api/upload', { method: 'POST', body: fd });
-      if (!upRes.ok) throw new Error((await upRes.json()).detail || 'Upload failed');
-      const upData = await upRes.json();
-      await burnTask(upData.task_id, videoFile.name, subFile.name);
-    } else {
-      batchBurn();
-      return;
-    }
-  } catch (e) {
-    toast(e.message, 'error'); btn.disabled = false;
-  }
-};
-
-const burnTask = async (taskId, vName, sName) => {
-  const fd = new FormData();
-  fd.append('task_id', taskId); fd.append('video_name', vName); fd.append('subtitle_name', sName);
-  fd.append('crf', $('#crf').value); fd.append('preset', $('#preset').value);
-  fd.append('codec', $('#codec').value); fd.append('style', $('#style').value);
-  const r = await fetch('/api/burn', { method: 'POST', body: fd });
-  if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
-  toast('Task queued');
-  addLocalTask(taskId, vName);
-  pollTasks();
-};
-
-const addLocalTask = (taskId, name) => {
-  const list = $('#taskList');
-  if (list.querySelector('.empty')) list.innerHTML = '';
-  const div = document.createElement('div');
-  div.className = 'task-item';
-  div.id = 'task-' + taskId;
-  div.innerHTML = '<div class="task-head"><span class="task-name">' + name + '</span><span class="task-id">' + taskId + '</span></div><div class="status queued">queued</div><div class="progress-wrap"><div class="progress-bar" id="pb-' + taskId + '"></div></div>';
-  list.prepend(div);
-};
-
-const pollTasks = () => {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    const r = await fetch('/api/queue');
-    if (!r.ok) return;
-    const data = await r.json();
-    data.forEach(t => {
-      const el = document.getElementById('task-' + t.task_id);
-      if (!el) return;
-      const statusEl = el.querySelector('.status');
-      statusEl.className = 'status ' + t.status;
-      statusEl.textContent = t.status === 'processing' ? 'processing ' + (t.progress||0) + '%' : t.status;
-      const pb = document.getElementById('pb-' + t.task_id);
-      if (pb) pb.style.width = (t.progress || 0) + '%';
-      if (t.status === 'completed' || t.status === 'failed') {
-        if (!el.querySelector('.task-actions')) {
-          const div = document.createElement('div');
-          div.className = 'task-actions';
-          if (t.status === 'completed') div.innerHTML = '<button onclick="downloadTask(\'' + t.task_id + '\')">download</button>';
-          div.innerHTML += '<button class="delete" onclick="removeTask(\'' + t.task_id + '\')">delete</button>';
-          el.appendChild(div);
-        }
-      }
-    });
-    if (data.every(t => t.status === 'completed' || t.status === 'failed')) {
-      clearInterval(pollTimer); pollTimer = null;
-    }
-  }, 2000);
-};
-
-const downloadTask = (id) => { window.location.href = '/api/download/' + id; };
-const removeTask = (id) => { document.getElementById('task-' + id) && document.getElementById('task-' + id).remove(); };
-
 const resetForm = () => {
-  videoFile = subFile = null;
-  pickedVideo = pickedSub = null;
-  selectedVideoMedia = selectedSubMedia = null;
-  mediaPairs = [];
-  $('#videoDrop').classList.remove('has-file');
-  $('#subDrop').classList.remove('has-file');
-  $('#videoInfo').style.display = 'none';
-  $('#subInfo').style.display = 'none';
-  updatePairUI();
+  Upload.reset();
+  Media.clearAllPairs();
+  $('#style').value = '';
   checkReady();
 };
 
-const logout = async () => { await fetch('/api/logout', { method: 'POST' }); location.href = '/login'; };
+let mode = 'upload';
+let me = null, gpuStatus = null;
 
+// 初始化
 (async () => {
-  const r = await fetch('/api/me');
-  if (!r.ok) { location.href = '/login'; return; }
-  me = await r.json();
-  $('#userName').textContent = ' user ' + me.user;
+  await Auth.init();
+  // 设置上传拖拽
+  Upload.setupDrop($('#videoDrop'), (f) => Upload.setVideoFile(f));
+  Upload.setupDrop($('#subDrop'), (f) => Upload.setSubFile(f));
+  // GPU 状态
   try {
     const gr = await fetch('/api/gpu/status');
     if (gr.ok) {
@@ -555,9 +321,8 @@ const logout = async () => { await fetch('/api/logout', { method: 'POST' }); loc
       }
     }
   } catch (e) {}
-  pollTasks();
+  Queue.pollTasks();
 })();
-
 </script>
 </body>
 </html>

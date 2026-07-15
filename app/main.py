@@ -155,8 +155,48 @@ async def run_burn_task(task_id):
 
         cmd = _build_ffmpeg_cmd(video_path, sub_path, output_path, params)
 
+        # 获取视频总时长用于进度计算
+        total_duration = 0
+        try:
+            probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
+            probe_result = await asyncio.create_subprocess_exec(*probe_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await probe_result.wait()
+            if probe_result.returncode == 0:
+                dur_str = (await probe_result.stdout.read()).decode().strip()
+                total_duration = float(dur_str) if dur_str else 0
+        except Exception:
+            total_duration = 0
+
         process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+
+        # 实时解析 stderr 更新进度
+        async def read_stderr():
+            nonlocal process
+            current_time = 0.0
+            while True:
+                line = await process.stderr.readline()
+                if not line:
+                    break
+                line_str = line.decode("utf-8", errors="ignore").strip()
+                # 解析 time= 字段
+                if "time=" in line_str and total_duration > 0:
+                    try:
+                        time_part = line_str.split("time=")[1].split(" ")[0].strip()
+                        # 格式: HH:MM:SS.ms 或 HH:MM:SS
+                        parts = time_part.split(":")
+                        if len(parts) == 3:
+                            h, m, s = parts
+                            s = float(s)
+                            current_time = float(h) * 3600 + float(m) * 60 + s
+                            progress = min(int((current_time / total_duration) * 100), 99)
+                            tasks[task_id]["progress"] = progress
+                            db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (progress, task_id))
+                    except (ValueError, IndexError):
+                        pass
+
+        stderr_task = asyncio.create_task(read_stderr())
         await process.wait()
+        stderr_task.cancel()
 
         if process.returncode != 0 or not output_path.exists():
             raise Exception("FFmpeg 执行失败")
