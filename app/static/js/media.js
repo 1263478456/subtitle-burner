@@ -29,7 +29,7 @@ const Media = (() => {
       '<button class="del-pair" onclick="Media.removePair(' + i + ')">x</button>' +
       '</div>'
     ).join('');
-    $('#burnBtn').disabled = (mediaPairs.length === 0);
+    if (typeof checkReady === 'function') checkReady();
   };
 
   const addPair = (videoPath, videoName, subPath, subName) => {
@@ -154,8 +154,40 @@ const Media = (() => {
   const getPairs = () => mediaPairs;
   const clearAllPairs = clearPairs;
 
+  const setTab = (tab) => {
+    const uploadBtn = $('#tab-upload');
+    const mediaBtn = $('#tab-media');
+    const uploadArea = $('#tab-upload-area');
+    const mediaArea = $('#tab-media-area');
+
+    if (!uploadBtn || !mediaBtn || !uploadArea || !mediaArea) return;
+
+    if (tab === 'upload') {
+      uploadBtn.classList.add('active');
+      mediaBtn.classList.remove('active');
+      uploadArea.style.display = 'block';
+      mediaArea.style.display = 'none';
+      if (typeof mode !== 'undefined') mode = 'upload';
+      if (typeof checkReady === 'function') checkReady();
+    } else if (tab === 'media') {
+      uploadBtn.classList.remove('active');
+      mediaBtn.classList.add('active');
+      uploadArea.style.display = 'none';
+      mediaArea.style.display = 'block';
+      if (typeof mode !== 'undefined') mode = 'media';
+      // 如果媒体列表还没加载实际内容，自动加载根目录
+      const list = $('#mediaList');
+      if (list && !list.querySelector('.media-item')) {
+        loadMedia('');
+      }
+    }
+  };
+
   return {
     loadMedia, addPair, removePair, clearPairs, smartPair,
-    getPairs, clearAllPairs, updatePairUI
+    getPairs, clearAllPairs, updatePairUI, setTab
   };
 })();
+
+// 挂载到全局作用域，因为 HTML onclick 直接调用 setTab
+window.setTab = Media.setTab;

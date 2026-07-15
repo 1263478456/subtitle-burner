@@ -325,6 +325,28 @@ async def burn_subtitle(user: str = Depends(require_auth),
     await queue.put(task_id)
     return {"task_id": task_id, "status": "queued", "queue_size": queue.qsize()}
 
+@app.post("/api/retry/{task_id}")
+async def retry_task(task_id: str, user: str = Depends(require_auth)):
+    if task_id not in tasks:
+        raise HTTPException(404, "任务不存在")
+    task = tasks[task_id]
+    if task.get("user") != user:
+        raise HTTPException(403, "无权访问")
+    if task.get("status") in ("queued", "processing"):
+        raise HTTPException(400, "任务已在队列中")
+    now = datetime.now().isoformat()
+    tasks[task_id].update({
+        "status": "queued",
+        "progress": 0,
+        "error": None,
+        "completed_at": None,
+        "created_at": now,
+    })
+    db_execute("UPDATE tasks SET status=?, progress=?, error=?, completed_at=?, created_at=? WHERE task_id=?",
+               ("queued", 0, None, None, now, task_id))
+    await queue.put(task_id)
+    return {"task_id": task_id, "status": "queued", "queue_size": queue.qsize()}
+
 @app.get("/api/status/{task_id}")
 async def get_task_status(task_id: str, user: str = Depends(require_auth)):
     if task_id not in tasks:

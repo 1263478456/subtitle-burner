@@ -259,27 +259,10 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 
 <script src="/static/js/auth.js"></script>
 <script src="/static/js/utils.js"></script>
-<script src="/static/js/auth.js"></script>
 <script src="/static/js/upload.js"></script>
 <script src="/static/js/media.js"></script>
 <script src="/static/js/queue.js"></script>
 <script>
-const checkReady = () => {
-  if (mode === 'upload') {
-    $('#burnBtn').disabled = !Upload.isReady();
-  }
-};
-
-const setTab = (t) => {
-  mode = t;
-  $('#tab-upload').classList.toggle('active', t === 'upload');
-  $('#tab-media').classList.toggle('active', t === 'media');
-  $('#tab-upload-area').style.display = t === 'upload' ? 'block' : 'none';
-  $('#tab-media-area').style.display = t === 'media' ? 'block' : 'none';
-  if (t === 'upload') { checkReady(); }
-  if (t === 'media') Media.loadMedia();
-};
-
 const setCodecOptions = (gpu) => {
   const sel = $('#codec');
   Array.from(sel.options).forEach(o => {
@@ -291,8 +274,14 @@ const setCodecOptions = (gpu) => {
 const resetForm = () => {
   Upload.reset();
   Media.clearAllPairs();
-  $('#style').value = '';
-  checkReady();
+  const styleEl = $('#style');
+  if (styleEl) styleEl.value = '';
+};
+
+const checkReady = () => {
+  const ready = mode === 'upload' ? Upload.isReady() : Media.getPairs().length > 0;
+  const btn = $('#burnBtn');
+  if (btn) btn.disabled = !ready;
 };
 
 let mode = 'upload';
