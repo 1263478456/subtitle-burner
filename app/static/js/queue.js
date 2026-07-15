@@ -22,13 +22,31 @@ const Queue = (() => {
     list.prepend(div);
   };
 
+  const fmtETA = (seconds) => {
+    if (!seconds || seconds < 0) return '';
+    if (seconds < 60) return Math.ceil(seconds) + '秒';
+    if (seconds < 3600) return Math.floor(seconds / 60) + '分' + Math.ceil(seconds % 60) + '秒';
+    return Math.floor(seconds / 3600) + '时' + Math.floor((seconds % 3600) / 60) + '分';
+  };
+
   const updateTaskUI = (t) => {
     const el = document.getElementById('task-' + t.task_id);
     if (!el) return;
     const statusEl = el.querySelector('.status');
     statusEl.className = 'status ' + t.status;
     const progressVal = parseFloat(t.progress) || 0;
-    statusEl.textContent = t.status === 'processing' ? '处理中 ' + progressVal.toFixed(2) + '%' : 
+    
+    // 计算 ETA
+    let etaText = '';
+    if (t.status === 'processing' && progressVal > 0 && t.started_at) {
+      const startTime = new Date(t.started_at).getTime();
+      const now = Date.now();
+      const elapsed = (now - startTime) / 1000; // 秒
+      const remaining = elapsed * (100 - progressVal) / progressVal;
+      etaText = ' · 剩余 ' + fmtETA(remaining);
+    }
+    
+    statusEl.textContent = t.status === 'processing' ? '处理中 ' + progressVal.toFixed(2) + '%' + etaText : 
                            t.status === 'queued' ? '排队中' :
                            t.status === 'completed' ? '已完成' :
                            t.status === 'failed' ? '失败' : t.status;

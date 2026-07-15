@@ -142,6 +142,7 @@ async def run_burn_task(task_id):
     try:
         tasks[task_id]["status"] = "processing"
         tasks[task_id]["progress"] = 0
+        tasks[task_id]["started_at"] = datetime.now().isoformat()
         db_execute("UPDATE tasks SET status=?, progress=? WHERE task_id=?",
                    ("processing", 0, task_id))
 
