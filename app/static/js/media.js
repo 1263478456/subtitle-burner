@@ -19,16 +19,21 @@ const Media = (() => {
     if (!sec) return;
     const cnt = $('#pairCount');
     const list = $('#pairList');
-    sec.style.display = (mediaPairs.length > 0) ? 'block' : 'none';
+    // 始终显示配对区域，即使为空也保留面板（用户能看到入口）
+    sec.style.display = 'block';
     cnt.textContent = mediaPairs.length;
-    list.innerHTML = mediaPairs.map((p, i) =>
-      '<div class="pair-row">' +
-      '<span class="vid" title="' + p.videoPath + '">V ' + p.videoName + '</span>' +
-      '<span class="sep">+</span>' +
-      '<span class="sub" title="' + p.subPath + '"> S ' + p.subName + '</span>' +
-      '<button class="del-pair" onclick="Media.removePair(' + i + ')">x</button>' +
-      '</div>'
-    ).join('');
+    if (mediaPairs.length === 0) {
+      list.innerHTML = '<div class="pair-empty">尚未配对，可手动点选视频和字幕，或使用智能匹配</div>';
+    } else {
+      list.innerHTML = mediaPairs.map((p, i) =>
+        '<div class="pair-row">' +
+        '<span class="vid" title="' + p.videoPath + '">V ' + p.videoName + '</span>' +
+        '<span class="sep">+</span>' +
+        '<span class="sub" title="' + p.subPath + '"> S ' + p.subName + '</span>' +
+        '<button class="del-pair" onclick="Media.removePair(' + i + ')">x</button>' +
+        '</div>'
+      ).join('');
+    }
     if (typeof checkReady === 'function') checkReady();
   };
 
@@ -40,7 +45,23 @@ const Media = (() => {
       crf: $('#crf').value, preset: $('#preset').value,
       codec: $('#codec').value, style: $('#style').value
     });
+    // 强制把 mode 切到 media（防止用户在 upload 模式下误调）
+    if (typeof mode !== 'undefined' && mode !== 'media') {
+      mode = 'media';
+      const uploadBtn = $('#tab-upload');
+      const mediaBtn = $('#tab-media');
+      const uploadArea = $('#tab-upload-area');
+      const mediaArea = $('#tab-media-area');
+      if (uploadBtn) uploadBtn.classList.remove('active');
+      if (mediaBtn) mediaBtn.classList.add('active');
+      if (uploadArea) uploadArea.style.display = 'none';
+      if (mediaArea) mediaArea.style.display = 'block';
+    }
     updatePairUI();
+    // 显式再调一次 checkReady（防止 updatePairUI 因闭包时机问题失效）
+    if (typeof checkReady === 'function') {
+      try { checkReady(); } catch (e) { console.error('checkReady error:', e); }
+    }
     toast('Paired: ' + videoName + ' + ' + subName);
   };
 
@@ -145,6 +166,7 @@ const Media = (() => {
   };
 
   const getPairs = () => mediaPairs;
+  const hasPairs = () => mediaPairs.length > 0;
   const clearAllPairs = clearPairs;
 
   const setTab = (tab) => {
@@ -182,7 +204,7 @@ const Media = (() => {
 
   return {
     loadMedia, addPair, removePair, clearPairs, smartPair,
-    getPairs, clearAllPairs, updatePairUI, setTab
+    getPairs, hasPairs, clearAllPairs, updatePairUI, setTab
   };
 })();
 
