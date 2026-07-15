@@ -75,10 +75,15 @@ const Queue = (() => {
   const removeTask = (id) => { const el = document.getElementById('task-' + id); if (el) el.remove(); };
 
   const startBurn = async () => {
+    console.log('[startBurn] mode=' + window.mode);
     const btn = $('#burnBtn');
-    btn.disabled = true;
+    if (btn) btn.disabled = true;
     try {
-      if (mode === 'upload') {
+      if (window.mode === 'upload') {
+        // 上传模式
+        if (!Upload.getVideoFile() || !Upload.getSubFile()) {
+          throw new Error('请先选择视频和字幕文件');
+        }
         const fd = new FormData();
         fd.append('video', Upload.getVideoFile());
         fd.append('subtitle', Upload.getSubFile());
@@ -87,12 +92,14 @@ const Queue = (() => {
         const upData = await upRes.json();
         await burnTask(upData.task_id, Upload.getVideoFile().name, Upload.getSubFile().name);
       } else {
+        // 媒体库批量模式
         await batchBurn();
         return;
       }
     } catch (e) {
+      console.error('[startBurn] error:', e);
       toast(e.message, 'error');
-      btn.disabled = false;
+      if (btn) btn.disabled = false;
     }
   };
 
@@ -114,7 +121,13 @@ const Queue = (() => {
 
   const batchBurn = async () => {
     const pairs = Media.getPairs();
-    if (pairs.length === 0) return;
+    console.log('[batchBurn] pairs=' + pairs.length);
+    if (pairs.length === 0) {
+      toast('请先配对视频和字幕文件', 'error');
+      const btn = $('#burnBtn');
+      if (btn) btn.disabled = false;
+      return;
+    }
     const btn = $('#burnBtn');
     const originalText = btn.textContent;
     btn.disabled = true;

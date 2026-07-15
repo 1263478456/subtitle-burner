@@ -52,9 +52,9 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 .upload-area.has-file { border-color: var(--ok); background: rgba(16,185,129,0.05); }
 .btn { padding: 10px 18px; border-radius: 6px; border: none; cursor: pointer;
        font-size: 13px; font-weight: 500; transition: all 0.15s; }
-.btn-primary { background: linear-gradient(135deg, var(--primary), var(--purple)); color: #fff; }
-.btn-primary:hover:not(:disabled) { opacity: 0.9; }
-.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--purple)); color: #fff; cursor: pointer; }
+.btn-primary:hover:not(.btn-disabled) { opacity: 0.9; }
+.btn-primary.btn-disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
 .btn-ghost:hover { color: var(--text); border-color: var(--primary); }
 .actions { display: flex; gap: 8px; margin-top: 18px; }
@@ -241,7 +241,7 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" id="burnBtn" onclick="if(!this.disabled&&Queue&&Queue.startBurn) Queue.startBurn()">🚀 开始烧录</button>
+        <button class="btn btn-primary" id="burnBtn" onclick="Queue.startBurn()">🚀 开始烧录</button>
         <button class="btn btn-ghost" onclick="resetForm()">重置</button>
       </div>
     </div>
@@ -295,9 +295,12 @@ const checkReady = () => {
     } else {
       ready = !!(window.Media && Media.hasPairs && Media.hasPairs());
     }
-    if (btn.disabled === ready) {
-      btn.disabled = !ready;
-      console.log('[checkReady] mode=' + window.mode + ' ready=' + ready + ' pairs=' + (window.Media ? Media.getPairs().length : 'N/A'));
+    const shouldBeDisabled = !ready;
+    if (btn.disabled !== shouldBeDisabled) {
+      btn.disabled = shouldBeDisabled;
+      if (shouldBeDisabled) btn.classList.add('btn-disabled');
+      else btn.classList.remove('btn-disabled');
+      console.log('[checkReady] mode=' + window.mode + ' ready=' + ready + ' pairs=' + (window.Media ? Media.getPairs().length : 'N/A') + ' btn.disabled=' + btn.disabled);
     }
   } catch (e) {
     console.error('checkReady error:', e);
