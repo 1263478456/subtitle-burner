@@ -260,8 +260,13 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 
 <div class="toast" id="toast"></div>
 
+<script src="/static/js/auth.js"></script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/upload.js"></script>
+<script src="/static/js/media.js"></script>
+<script src="/static/js/queue.js"></script>
 <script>
-// 全局状态（必须在模块脚本之前声明，模块通过 window.mode 读取）
+// 全局状态（必须在模块脚本加载完之后才能用 $ 等工具）
 window.mode = 'upload';
 
 const setCodecOptions = (gpu) => {
@@ -301,13 +306,6 @@ const resetForm = () => {
 window.checkReady = checkReady;
 window.setCodecOptions = setCodecOptions;
 window.resetForm = resetForm;
-</script>
-<script src="/static/js/auth.js"></script>
-<script src="/static/js/utils.js"></script>
-<script src="/static/js/upload.js"></script>
-<script src="/static/js/media.js"></script>
-<script src="/static/js/queue.js"></script>
-<script>
 let me = null, gpuStatus = null;
 
 // 初始化
