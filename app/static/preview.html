@@ -1049,11 +1049,25 @@ async function confirmSelection() {
   const fileName = mediaBrowserSelected.split('/').pop();
   
   if (mediaBrowserMode === 'video') {
-    const videoUrl = '/api/media/stream?path=' + encodeURIComponent(mediaBrowserSelected);
+    // 使用预览流转码 API（自动处理 EAC3 等不兼容音频）
+    const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(mediaBrowserSelected);
     video.src = videoUrl;
     state.videoPath = mediaBrowserSelected;
     document.getElementById('videoName').textContent = fileName;
     showToast('视频已加载: ' + fileName);
+    
+    // 检测音频编码并提示
+    try {
+      const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(mediaBrowserSelected));
+      if (probeResponse.ok) {
+        const probeData = await probeResponse.json();
+        if (probeData.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(probeData.audio_codec)) {
+          showToast('音频格式 ' + probeData.audio_codec + ' 将自动转码为 AAC', 'success');
+        }
+      }
+    } catch (e) {
+      // 忽略探测失败
+    }
   } else {
     try {
       const response = await fetch('/api/media/file?path=' + encodeURIComponent(mediaBrowserSelected));

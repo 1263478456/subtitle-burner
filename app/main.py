@@ -369,6 +369,144 @@ async def stream_media_file(path: str, request: Request):
     
     return FileResponse(full_path, media_type="video/mp4")
 
+@app.get("/api/media/probe")
+async def probe_media_file(path: str, request: Request):
+    """探测媒体文件的编码信息"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    if ".." in path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    # 使用 ffprobe 获取媒体信息
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_streams", "-show_format", str(full_path)
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            raise Exception("ffprobe 失败")
+        
+        import json as _json
+        info = _json.loads(result.stdout)
+        
+        # 提取音频编码信息
+        audio_codec = None
+        audio_channels = None
+        for stream in info.get("streams", []):
+            if stream.get("codec_type") == "audio":
+                audio_codec = stream.get("codec_name")
+                audio_channels = stream.get("channels")
+                break
+        
+        return {
+            "audio_codec": audio_codec,
+            "audio_channels": audio_channels,
+            "format": info.get("format", {}),
+            "streams": info.get("streams", [])
+        }
+    except Exception as e:
+        logger.error(f"媒体探测失败: {e}")
+        return {"audio_codec": "unknown", "audio_channels": 0, "error": str(e)}
+
+@app.get("/api/media/preview-stream")
+async def preview_stream_media(path: str, request: Request):
+    """为预览提供转码后的流媒体（确保浏览器兼容性）
+    
+    这个端点会将视频的音频转码为 AAC 格式（如果原始音频不是浏览器支持的格式），
+    视频保持原样或转码为 H.264。
+    """
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    if ".." in path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    video_exts = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v']
+    if full_path.suffix.lower() not in video_exts:
+        raise HTTPException(400, "不是视频文件")
+    
+    # 浏览器支持的音频编码
+    BROWSER_AUDIO_CODECS = {'aac', 'mp3', 'opus', 'vorbis', 'wav', 'pcm_s16le'}
+    
+    # 探测音频编码
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(full_path)
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+        audio_codec = probe_result.stdout.strip().lower() if probe_result.returncode == 0 else "unknown"
+    except Exception:
+        audio_codec = "unknown"
+    
+    logger.info(f"[预览流] 文件: {full_path.name}, 音频编码: {audio_codec}")
+    
+    # 如果音频已经是浏览器支持的格式，直接返回原文件
+    if audio_codec in BROWSER_AUDIO_CODECS:
+        logger.info(f"[预览流] 音频编码 {audio_codec} 已兼容，直接返回")
+        return FileResponse(full_path, media_type="video/mp4")
+    
+    # 需要转码音频，使用 FFmpeg 流式转码
+    logger.info(f"[预览流] 音频编码 {audio_codec} 不兼容，转码为 AAC")
+    
+    # 构建 FFmpeg 命令：复制视频流，转码音频为 AAC
+    cmd = [
+        "ffmpeg", "-i", str(full_path),
+        "-c:v", "copy",           # 视频流直接复制
+        "-c:a", "aac",            # 音频转码为 AAC
+        "-b:a", "192k",           # 音频比特率
+        "-ac", "2",               # 立体声（5.1 → 2.0）
+        "-movflags", "frag_keyframe+empty_moov",  # 流式 MP4
+        "-f", "mp4",
+        "pipe:1"                  # 输出到 stdout
+    ]
+    
+    from fastapi.responses import StreamingResponse
+    import asyncio
+    
+    async def generate():
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        try:
+            while True:
+                chunk = await process.stdout.read(65536)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            process.terminate()
+            try:
+                await process.wait()
+            except:
+                pass
+    
+    return StreamingResponse(
+        generate(),
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        }
+    )
+
 @app.post("/api/login")
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
     import hashlib
