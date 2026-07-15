@@ -235,3 +235,4 @@ const Media = (() => {
 
 // 挂载到全局作用域，因为 HTML onclick 直接调用 setTab
 window.setTab = Media.setTab;
+window.Media = Media;
