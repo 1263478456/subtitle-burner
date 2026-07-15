@@ -26,17 +26,22 @@ MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "/media"))
 
 # GPU 编码器检测
 import subprocess as _sp
+import logging as _logging
+
+_logger = _logging.getLogger("subtitle-burner")
+
 def _detect_encoders():
     """检测可用的硬件编码器"""
     encoders = {"h264_nvenc": False, "hevc_nvenc": False, "av1_nvenc": False, "h264_qsv": False, "hevc_qsv": False}
     try:
-        result = _sp.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, timeout=5)
+        result = _sp.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, timeout=10)
         output = result.stdout.decode("utf-8", errors="ignore")
         for enc in encoders:
             if enc in output:
                 encoders[enc] = True
-    except Exception:
-        pass
+        _logger.info(f"FFmpeg 编码器检测结果: {encoders}")
+    except Exception as e:
+        _logger.error(f"FFmpeg 编码器检测失败: {e}")
     return encoders
 
 GPU_ENCODERS = _detect_encoders()
