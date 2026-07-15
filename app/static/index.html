@@ -214,6 +214,23 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 
       <div style="display:flex; gap:14px">
         <div class="form-row" style="flex:1">
+          <label>字幕处理模式</label>
+          <select id="subMode">
+            <option value="burn" selected>压制字幕（硬字幕）</option>
+            <option value="soft">添加字幕轨道（软字幕）</option>
+          </select>
+        </div>
+        <div class="form-row" style="flex:1">
+          <label>原字幕轨道</label>
+          <select id="keepOriginalSub">
+            <option value="false" selected>删除原字幕</option>
+            <option value="true">保留原字幕</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:14px">
+        <div class="form-row" style="flex:1">
           <label>编码器</label>
           <select id="codec">
             <option value="libx264">CPU · H.264</option>

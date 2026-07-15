@@ -122,9 +122,11 @@ const Queue = (() => {
     fd.append('preset', $('#preset').value);
     fd.append('codec', $('#codec').value);
     fd.append('style', $('#style').value);
+    fd.append('sub_mode', $('#subMode').value);
+    fd.append('keep_original_sub', $('#keepOriginalSub').value === 'true');
     const r = await fetch('/api/burn', { method: 'POST', body: fd });
     if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
-    toast('Task queued');
+    toast('任务已排队');
     addLocalTask(taskId, vName);
     pollTasks();
   };
@@ -168,6 +170,8 @@ const Queue = (() => {
         fd.append('preset', p.preset);
         fd.append('codec', p.codec);
         fd.append('style', p.style);
+        fd.append('sub_mode', $('#subMode').value);
+        fd.append('keep_original_sub', $('#keepOriginalSub').value === 'true');
         const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
         if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
         const data = await r.json();

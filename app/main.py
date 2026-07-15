@@ -140,7 +140,9 @@ async def run_burn_task(task_id):
         video_path = video_files[0]
         sub_path = sub_files[0]
         video_name = task["video_name"]
-        output_filename = f"{Path(video_name).stem}_burned.mp4"
+        # 输出文件命名：原视频名(压制完成).mp4
+        stem = Path(video_name).stem
+        output_filename = f"{stem}(压制完成).mp4"
         output_path = OUTPUT_DIR / f"{task_id}_{output_filename}"
 
         sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
@@ -336,13 +338,15 @@ async def burn_subtitle(user: str = Depends(require_auth),
                        crf: int = Form(18),
                        preset: str = Form("medium"),
                        codec: str = Form("libx264"),
-                       style: str = Form("")):
+                       style: str = Form(""),
+                       sub_mode: str = Form("burn"),
+                       keep_original_sub: bool = Form(False)):
     video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
     if not video_files:
         raise HTTPException(404, "文件不存在")
     if task_id in tasks and tasks[task_id].get("status") in ("queued", "processing"):
         raise HTTPException(400, "任务已在队列中")
-    params = {"video_name": video_name, "duration": duration, "crf": crf, "preset": preset, "codec": codec, "style": style}
+    params = {"video_name": video_name, "duration": duration, "crf": crf, "preset": preset, "codec": codec, "style": style, "sub_mode": sub_mode, "keep_original_sub": keep_original_sub}
     now = datetime.now().isoformat()
     tasks[task_id] = {"task_id": task_id, "user": user, "video_name": video_name, "status": "queued", "progress": 0, "params": params, "created_at": now}
     db_execute("""INSERT OR REPLACE INTO tasks (task_id, user, video_name, subtitle_name, status, progress, params, created_at)
@@ -541,6 +545,8 @@ async def burn_from_media(
     preset: str = Form("medium"),
     codec: str = Form("libx264"),
     style: str = Form(""),
+    sub_mode: str = Form("burn"),
+    keep_original_sub: bool = Form(False),
 ):
     """直接从媒体库添加烧录任务（不需要上传）"""
     # 安全检查
@@ -573,6 +579,8 @@ async def burn_from_media(
         "preset": preset,
         "codec": codec,
         "style": style,
+        "sub_mode": sub_mode,
+        "keep_original_sub": keep_original_sub,
     }
 
     now = datetime.now().isoformat()
@@ -654,13 +662,8 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     crf = params.get("crf", 18)
     preset = params.get("preset", "medium")
     style = params.get("style", "")
-    
-    sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
-    vf_parts = [f"subtitles='{sub_escaped}'"]
-    if sub_path.suffix.lower() in ['.srt', '.vtt']:
-        s = style or 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
-        vf_parts[0] += f":force_style='{s}'"
-    vf = ",".join(vf_parts)
+    sub_mode = params.get("sub_mode", "burn")  # burn=压制字幕, soft=添加字幕轨道
+    keep_original_sub = params.get("keep_original_sub", False)  # 是否保留原字幕轨道
     
     # NVENC 预设映射
     nvenc_preset_map = {
@@ -669,6 +672,29 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         "slow": "p6", "veryslow": "p7"
     }
     nvenc_preset = nvenc_preset_map.get(preset, "p5")
+    
+    # 软字幕模式：添加字幕轨道（不重新编码视频）
+    if sub_mode == "soft":
+        cmd = ["ffmpeg", "-y", "-i", str(video_path), "-i", str(sub_path)]
+        
+        # 映射流
+        cmd.extend(["-map", "0:v:0", "-map", "0:a?"])
+        if keep_original_sub:
+            cmd.extend(["-map", "0:s?"])  # 保留原字幕轨道
+        cmd.extend(["-map", "1:0"])  # 添加新字幕轨道
+        
+        # 编码设置
+        cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"])
+        cmd.append(str(output_path))
+        return cmd
+    
+    # 硬字幕模式：压制字幕到画面
+    sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
+    vf_parts = [f"subtitles='{sub_escaped}'"]
+    if sub_path.suffix.lower() in ['.srt', '.vtt']:
+        s = style or 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
+        vf_parts[0] += f":force_style='{s}'"
+    vf = ",".join(vf_parts)
     
     # GPU 编码特殊处理
     # 注意：使用 subtitles 滤镜时不能用 -hwaccel cuda（会导致滤镜失败）
@@ -700,15 +726,6 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
             "-preset", "medium", "-global_quality", str(crf),
             "-c:a", "copy",
             "-map", "0:v:0", "-map", "0:a?",
-            str(output_path)
-        ]
-    elif codec == "copy":
-        return [
-            "ffmpeg", "-y", "-i", str(video_path),
-            "-i", str(sub_path),
-            "-map", "0:v:0", "-map", "0:a?",
-            "-map", "1:0", "-c:v", "copy",
-            "-c:a", "copy", "-c:s", "mov_text",
             str(output_path)
         ]
     else:
