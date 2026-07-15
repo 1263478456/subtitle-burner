@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html><body>
+<div id="result"></div>
+<script>
+// 模拟整个流程
+const log = (msg) => {
+  document.getElementById('result').innerHTML += msg + '<br>';
+  console.log(msg);
+};
+
+let mediaPairs = [];
+const Media = {
+  getPairs: () => mediaPairs,
+  hasPairs: () => mediaPairs.length > 0,
+  smartPair: () => {
+    log('smartPair called, mode=' + window.mode);
+    mediaPairs.push({videoPath: 'a', subPath: 'b'});
+    mediaPairs.push({videoPath: 'c', subPath: 'd'});
+    if (window.checkReady) window.checkReady();
+  },
+  setTab: (tab) => {
+    window.mode = tab;
+    log('setTab(' + tab + '), mode=' + window.mode);
+    if (window.checkReady) window.checkReady();
+  }
+};
+window.Media = Media;
+
+window.mode = 'upload';
+const btn = document.createElement('button');
+btn.id = 'burnBtn';
+btn.disabled = true;
+btn.textContent = '开始烧录';
+document.body.appendChild(btn);
+
+window.checkReady = () => {
+  const ready = window.mode === 'media' ? Media.hasPairs() : false;
+  log('checkReady: mode=' + window.mode + ', pairs=' + Media.getPairs().length + ', setting btn.disabled=' + (!ready));
+  btn.disabled = !ready;
+};
+
+log('=== Step 1: page loaded ===');
+log('mode=' + window.mode + ', btn.disabled=' + btn.disabled);
+
+log('=== Step 2: setTab(media) ===');
+Media.setTab('media');
+log('mode=' + window.mode + ', btn.disabled=' + btn.disabled);
+
+log('=== Step 3: smartPair() ===');
+Media.smartPair();
+log('mode=' + window.mode + ', btn.disabled=' + btn.disabled);
+
+log('=== RESULT: ' + (btn.disabled ? 'STILL DISABLED ❌' : 'ENABLED ✅') + ' ===');
+</script>
+</body></html>

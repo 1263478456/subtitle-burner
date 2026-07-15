@@ -144,6 +144,13 @@ const Queue = (() => {
     fd.append('style', $('#style').value);
     fd.append('sub_mode', $('#subMode').value);
     fd.append('keep_original_sub', $('#keepOriginalSub').value === 'true');
+    
+    // 添加预览参数
+    const previewParams = localStorage.getItem('subtitlePreviewParams');
+    if (previewParams) {
+      fd.append('preview_params', previewParams);
+    }
+    
     const r = await fetch('/api/burn', { method: 'POST', body: fd });
     if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
     toast('任务已排队');
@@ -192,6 +199,13 @@ const Queue = (() => {
         fd.append('style', $('#style').value);
         fd.append('sub_mode', $('#subMode').value);
         fd.append('keep_original_sub', $('#keepOriginalSub').value === 'true');
+        
+        // 添加预览参数
+        const previewParams = localStorage.getItem('subtitlePreviewParams');
+        if (previewParams) {
+          fd.append('preview_params', previewParams);
+        }
+        
         const r = await fetch('/api/media/burn', { method: 'POST', body: fd });
         if (!r.ok) throw new Error((await r.json()).detail || 'Submit failed');
         const data = await r.json();

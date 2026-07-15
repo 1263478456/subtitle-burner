@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>字幕预览 · Subtitle Preview</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f0f0f; --panel: #1a1a1a; --border: #333;
+  --text: #e5e5e5; --muted: #999; --dim: #666;
+  --primary: #3b82f6; --purple: #8b5cf6;
+  --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+}
+body { 
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh;
+  display: flex; flex-direction: column;
+}
+header { 
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  padding: 12px 24px; display: flex; justify-content: space-between; align-items: center;
+}
+header h1 { 
+  font-size: 16px;
+  background: linear-gradient(135deg, var(--primary), var(--purple));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.header-actions { display: flex; gap: 8px; }
+.btn { 
+  padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer;
+  font-size: 13px; font-weight: 500; transition: all 0.15s;
+}
+.btn-primary { background: linear-gradient(135deg, var(--primary), var(--purple)); color: #fff; }
+.btn-primary:hover { opacity: 0.9; }
+.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+.btn-ghost:hover { color: var(--text); border-color: var(--primary); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+.main-container { 
+  flex: 1; display: flex; gap: 0; overflow: hidden;
+}
+
+/* 视频区域 */
+.video-section { 
+  flex: 1; display: flex; flex-direction: column; 
+  background: #000; position: relative;
+}
+.video-wrapper { 
+  flex: 1; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+#videoPlayer { 
+  max-width: 100%; max-height: 100%; 
+  width: 100%; height: 100%; object-fit: contain;
+}
+
+/* 字幕叠加层 */
+.subtitle-overlay { 
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none; overflow: hidden;
+}
+.subtitle-line { 
+  position: absolute; text-align: center; width: 100%;
+  padding: 0 20px;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+  transition: all 0.1s ease;
+  white-space: pre-wrap; word-wrap: break-word;
+}
+
+/* 视频控制栏 */
+.video-controls { 
+  background: var(--panel); border-top: 1px solid var(--border);
+  padding: 12px 16px;
+}
+.progress-bar { 
+  width: 100%; height: 6px; background: #333; border-radius: 3px;
+  cursor: pointer; margin-bottom: 8px; position: relative;
+}
+.progress-fill { 
+  height: 100%; background: linear-gradient(90deg, var(--primary), var(--purple));
+  border-radius: 3px; width: 0%; transition: width 0.1s;
+}
+.progress-handle { 
+  position: absolute; top: -4px; width: 14px; height: 14px;
+  background: #fff; border-radius: 50%; transform: translateX(-50%);
+  cursor: pointer; opacity: 0; transition: opacity 0.2s;
+}
+.progress-bar:hover .progress-handle { opacity: 1; }
+.controls-row { 
+  display: flex; align-items: center; gap: 12px;
+}
+.controls-row button { 
+  background: transparent; border: none; color: var(--text);
+  cursor: pointer; font-size: 18px; padding: 4px;
+}
+.controls-row button:hover { color: var(--primary); }
+.time-display { 
+  font-size: 12px; color: var(--muted); font-family: monospace;
+}
+.time-display .current { color: var(--text); }
+.volume-control { 
+  display: flex; align-items: center; gap: 6px; margin-left: auto;
+}
+.volume-control input[type="range"] { 
+  width: 80px; height: 4px; -webkit-appearance: none; background: #444;
+  border-radius: 2px; outline: none;
+}
+.volume-control input[type="range"]::-webkit-slider-thumb { 
+  -webkit-appearance: none; width: 12px; height: 12px;
+  background: #fff; border-radius: 50%; cursor: pointer;
+}
+.speed-control select { 
+  background: #333; border: 1px solid #444; color: var(--text);
+  padding: 4px 8px; border-radius: 4px; font-size: 12px;
+}
+
+/* 控制面板 */
+.control-panel { 
+  width: 360px; background: var(--panel); border-left: 1px solid var(--border);
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.panel-section { 
+  padding: 16px; border-bottom: 1px solid var(--border);
+}
+.panel-section h3 { 
+  font-size: 13px; color: var(--text); margin-bottom: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+.panel-section h3 .icon { font-size: 14px; }
+.form-group { margin-bottom: 12px; }
+.form-group label { 
+  display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px;
+}
+.form-group input[type="number"],
+.form-group input[type="text"],
+.form-group select { 
+  width: 100%; padding: 8px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: #222;
+  color: var(--text); font-size: 13px; outline: none;
+}
+.form-group input:focus, .form-group select:focus { 
+  border-color: var(--primary);
+}
+.form-row { display: flex; gap: 10px; }
+.form-row .form-group { flex: 1; }
+.color-input { 
+  display: flex; align-items: center; gap: 8px;
+}
+.color-input input[type="color"] { 
+  width: 36px; height: 36px; border: 1px solid var(--border);
+  border-radius: 6px; cursor: pointer; padding: 2px;
+  background: #222;
+}
+.color-input input[type="text"] { flex: 1; }
+
+/* 滑块 */
+input[type="range"] { 
+  width: 100%; height: 6px; -webkit-appearance: none;
+  background: #333; border-radius: 3px; outline: none;
+}
+input[type="range"]::-webkit-slider-thumb { 
+  -webkit-appearance: none; width: 14px; height: 14px;
+  background: var(--primary); border-radius: 50%; cursor: pointer;
+}
+.range-value { 
+  font-size: 11px; color: var(--muted); text-align: right;
+  margin-top: 2px;
+}
+
+/* 预设按钮 */
+.presets { 
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+}
+.preset-btn { 
+  padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+  background: #222; color: var(--muted); cursor: pointer; font-size: 11px;
+}
+.preset-btn:hover { 
+  border-color: var(--primary); color: var(--primary);
+}
+.preset-btn.active { 
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+
+/* 快捷键提示 */
+.shortcuts { 
+  padding: 12px 16px; background: #111; font-size: 11px; color: var(--dim);
+}
+.shortcuts kbd { 
+  background: #333; padding: 2px 6px; border-radius: 3px;
+  border: 1px solid #444; font-family: monospace;
+}
+
+/* 加载状态 */
+.loading { 
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: var(--muted); font-size: 14px;
+}
+.loading-spinner { 
+  width: 40px; height: 40px; border: 3px solid #333;
+  border-top-color: var(--primary); border-radius: 50%;
+  animation: spin 1s linear infinite; margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Toast */
+.toast { 
+  position: fixed; top: 24px; right: 24px; padding: 12px 20px;
+  border-radius: 8px; font-size: 13px; z-index: 1000;
+  transform: translateX(120%); transition: transform 0.3s;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.toast.show { transform: translateX(0); }
+.toast.success { background: #065f46; color: #d1fae5; }
+.toast.error { background: #991b1b; color: #fee2e2; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 字幕预览工具</h1>
+  <div class="header-actions">
+    <button class="btn btn-ghost btn-sm" onclick="loadVideo()">📂 打开本地视频</button>
+    <button class="btn btn-ghost btn-sm" onclick="loadSubtitle()">💬 加载本地字幕</button>
+    <button class="btn btn-ghost btn-sm" onclick="showMediaBrowser()">📁 从媒体库选择</button>
+    <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 应用到压制</button>
+  </div>
+</header>
+
+<div class="main-container">
+  <div class="video-section">
+    <div class="video-wrapper">
+      <video id="videoPlayer"></video>
+      <div class="subtitle-overlay" id="subtitleOverlay"></div>
+      <div class="loading" id="loading" style="display:none">
+        <div class="loading-spinner"></div>
+        <div>加载中...</div>
+      </div>
+    </div>
+    <div class="video-controls">
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill" id="progressFill"></div>
+        <div class="progress-handle" id="progressHandle"></div>
+      </div>
+      <div class="controls-row">
+        <button onclick="togglePlay()" id="playBtn">▶️</button>
+        <button onclick="seek(-5)">⏪</button>
+        <button onclick="seek(5)">⏩</button>
+        <div class="time-display">
+          <span class="current" id="currentTime">00:00</span>
+          <span> / </span>
+          <span id="duration">00:00</span>
+        </div>
+        <div class="volume-control">
+          <button onclick="toggleMute()" id="muteBtn">🔊</button>
+          <input type="range" id="volumeSlider" min="0" max="100" value="100" oninput="setVolume(this.value)">
+        </div>
+        <div class="speed-control">
+          <select id="speedSelect" onchange="setSpeed(this.value)">
+            <option value="0.5">0.5x</option>
+            <option value="0.75">0.75x</option>
+            <option value="1" selected>1x</option>
+            <option value="1.25">1.25x</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2x</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="control-panel">
+    <!-- 时间偏移 -->
+    <div class="panel-section">
+      <h3><span class="icon">⏱️</span> 时间同步</h3>
+      <div class="form-group">
+        <label>字幕偏移量（秒）</label>
+        <input type="number" id="timeOffset" value="0" step="0.1" oninput="updateSubtitleParams()">
+        <div class="range-value">正值 = 字幕延后，负值 = 字幕提前</div>
+      </div>
+      <div class="presets">
+        <button class="preset-btn" onclick="setOffset(-5)">-5s</button>
+        <button class="preset-btn" onclick="setOffset(-1)">-1s</button>
+        <button class="preset-btn" onclick="setOffset(-0.5)">-0.5s</button>
+        <button class="preset-btn" onclick="setOffset(0)">0</button>
+        <button class="preset-btn" onclick="setOffset(0.5)">+0.5s</button>
+        <button class="preset-btn" onclick="setOffset(1)">+1s</button>
+        <button class="preset-btn" onclick="setOffset(5)">+5s</button>
+      </div>
+    </div>
+
+    <!-- 位置调整 -->
+    <div class="panel-section">
+      <h3><span class="icon">📍</span> 位置调整</h3>
+      <div class="form-group">
+        <label>垂直位置</label>
+        <select id="positionY" onchange="updateSubtitleParams()">
+          <option value="bottom">底部（默认）</option>
+          <option value="top">顶部</option>
+          <option value="center">居中</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>底部边距: <span id="marginBottomVal">30</span>px</label>
+        <input type="range" id="marginBottom" min="0" max="200" value="30" oninput="updateSubtitleParams(); document.getElementById('marginBottomVal').textContent=this.value">
+      </div>
+      <div class="form-group">
+        <label>顶部边距: <span id="marginTopVal">30</span>px</label>
+        <input type="range" id="marginTop" min="0" max="200" value="30" oninput="updateSubtitleParams(); document.getElementById('marginTopVal').textContent=this.value">
+      </div>
+    </div>
+
+    <!-- 字体样式 -->
+    <div class="panel-section">
+      <h3><span class="icon">🔤</span> 字体样式</h3>
+      <div class="form-group">
+        <label>字体大小: <span id="fontSizeVal">24</span>px</label>
+        <input type="range" id="fontSize" min="12" max="72" value="24" oninput="updateSubtitleParams(); document.getElementById('fontSizeVal').textContent=this.value">
+      </div>
+      <div class="form-group">
+        <label>字体族</label>
+        <select id="fontFamily" onchange="updateSubtitleParams()">
+          <option value="sans-serif">无衬线（默认）</option>
+          <option value="serif">衬线</option>
+          <option value="monospace">等宽</option>
+          <option value="Microsoft YaHei">微软雅黑</option>
+          <option value="PingFang SC">苹方</option>
+          <option value="SimHei">黑体</option>
+          <option value="SimSun">宋体</option>
+          <option value="KaiTi">楷体</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>字体颜色</label>
+        <div class="color-input">
+          <input type="color" id="fontColor" value="#ffffff" onchange="updateSubtitleParams(); document.getElementById('fontColorText').value=this.value">
+          <input type="text" id="fontColorText" value="#ffffff" onchange="document.getElementById('fontColor').value=this.value; updateSubtitleParams()">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>字体粗细</label>
+        <select id="fontWeight" onchange="updateSubtitleParams()">
+          <option value="normal">正常</option>
+          <option value="bold" selected>粗体</option>
+          <option value="lighter">细体</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 描边与阴影 -->
+    <div class="panel-section">
+      <h3><span class="icon">✨</span> 描边与阴影</h3>
+      <div class="form-group">
+        <label>描边宽度: <span id="outlineWidthVal">2</span>px</label>
+        <input type="range" id="outlineWidth" min="0" max="10" value="2" oninput="updateSubtitleParams(); document.getElementById('outlineWidthVal').textContent=this.value">
+      </div>
+      <div class="form-group">
+        <label>描边颜色</label>
+        <div class="color-input">
+          <input type="color" id="outlineColor" value="#000000" onchange="updateSubtitleParams(); document.getElementById('outlineColorText').value=this.value">
+          <input type="text" id="outlineColorText" value="#000000" onchange="document.getElementById('outlineColor').value=this.value; updateSubtitleParams()">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>阴影偏移: <span id="shadowOffsetVal">2</span>px</label>
+        <input type="range" id="shadowOffset" min="0" max="10" value="2" oninput="updateSubtitleParams(); document.getElementById('shadowOffsetVal').textContent=this.value">
+      </div>
+      <div class="form-group">
+        <label>背景透明度: <span id="bgOpacityVal">0</span>%</label>
+        <input type="range" id="bgOpacity" min="0" max="100" value="0" oninput="updateSubtitleParams(); document.getElementById('bgOpacityVal').textContent=this.value">
+      </div>
+    </div>
+
+    <!-- 快捷键 -->
+    <div class="shortcuts">
+      <div><kbd>Space</kbd> 播放/暂停</div>
+      <div><kbd>←</kbd> <kbd>→</kbd> 快退/快进 5秒</div>
+      <div><kbd>↑</kbd> <kbd>↓</kbd> 字幕偏移 ±0.5秒</div>
+      <div><kbd>[</kbd> <kbd>]</kbd> 字号 ±2px</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- 媒体浏览器弹窗 -->
+<div id="mediaBrowserModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:1000; display:none; align-items:center; justify-content:center;">
+  <div style="background:#1a1a1a; border:1px solid #333; border-radius:12px; width:700px; max-height:80vh; overflow:hidden; display:flex; flex-direction:column;">
+    <div style="padding:16px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:15px; color:#e5e5e5;">📁 媒体库浏览器</h3>
+      <button onclick="closeMediaBrowser()" style="background:none; border:none; color:#999; cursor:pointer; font-size:18px;">✕</button>
+    </div>
+    <div style="padding:12px 16px; border-bottom:1px solid #333; font-size:12px; color:#999;">
+      <span id="mediaBrowserBreadcrumb">📁 /</span>
+    </div>
+    <div id="mediaBrowserList" style="flex:1; overflow-y:auto; padding:12px; min-height:300px;">
+      <div style="text-align:center; color:#666; padding:40px;">加载中...</div>
+    </div>
+    <div style="padding:12px 16px; border-top:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+      <span id="mediaBrowserSelection" style="font-size:12px; color:#666;">点击文件选择</span>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost btn-sm" onclick="closeMediaBrowser()">取消</button>
+        <button class="btn btn-primary btn-sm" id="mediaBrowserConfirm" onclick="confirmMediaSelection()" disabled>确认选择</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="videoInput" accept="video/*" style="display:none">
+<input type="file" id="subInput" accept=".srt,.vtt,.ass,.ssa,.sub" style="display:none">
+
+<script>
+// 全局状态
+const state = {
+  videoPath: null,
+  subtitlePath: null,
+  subtitleContent: null,
+  subtitleType: null, // 'srt', 'ass', 'vtt'
+  parsedSubtitles: [], // [{start, end, text, ...}]
+  currentSubtitleIndex: -1,
+  params: {
+    timeOffset: 0,
+    positionY: 'bottom',
+    marginBottom: 30,
+    marginTop: 30,
+    fontSize: 24,
+    fontFamily: 'sans-serif',
+    fontColor: '#ffffff',
+    fontWeight: 'bold',
+    outlineWidth: 2,
+    outlineColor: '#000000',
+    shadowOffset: 2,
+    bgOpacity: 0
+  }
+};
+
+// DOM 元素
+const video = document.getElementById('videoPlayer');
+const overlay = document.getElementById('subtitleOverlay');
+const progressBar = document.getElementById('progressBar');
+const progressFill = document.getElementById('progressFill');
+const progressHandle = document.getElementById('progressHandle');
+
+// Toast 提示
+function showToast(msg, type = 'success') {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.className = `toast ${type} show`;
+  setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+// 格式化时间
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+// 加载视频
+function loadVideo() {
+  document.getElementById('videoInput').click();
+}
+
+document.getElementById('videoInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const url = URL.createObjectURL(file);
+  video.src = url;
+  state.videoPath = file.name;
+  
+  video.onloadedmetadata = () => {
+    document.getElementById('duration').textContent = formatTime(video.duration);
+    showToast('视频已加载: ' + file.name);
+  };
+});
+
+// 加载字幕
+function loadSubtitle() {
+  document.getElementById('subInput').click();
+}
+
+document.getElementById('subInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    state.subtitleContent = ev.target.result;
+    state.subtitlePath = file.name;
+    state.subtitleType = detectSubtitleType(file.name);
+    parseSubtitle();
+    showToast('字幕已加载: ' + file.name);
+  };
+  reader.readAsText(file);
+});
+
+// 检测字幕类型
+function detectSubtitleType(filename) {
+  const ext = filename.split('.').pop().toLowerCase();
+  if (ext === 'ass' || ext === 'ssa') return 'ass';
+  if (ext === 'vtt') return 'vtt';
+  return 'srt';
+}
+
+// 解析字幕
+function parseSubtitle() {
+  if (!state.subtitleContent) return;
+  
+  state.parsedSubtitles = [];
+  
+  if (state.subtitleType === 'srt') {
+    parseSRT();
+  } else if (state.subtitleType === 'vtt') {
+    parseVTT();
+  } else if (state.subtitleType === 'ass') {
+    parseASS();
+  }
+  
+  console.log(`Parsed ${state.parsedSubtitles.length} subtitles`);
+}
+
+// 解析 SRT
+function parseSRT() {
+  const blocks = state.subtitleContent.trim().split(/\n\s*\n/);
+  
+  blocks.forEach(block => {
+    const lines = block.trim().split('\n');
+    if (lines.length < 3) return;
+    
+    const timeMatch = lines[1].match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
+    if (!timeMatch) return;
+    
+    const start = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
+    const end = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
+    const text = lines.slice(2).join('\n').replace(/<[^>]+>/g, '');
+    
+    state.parsedSubtitles.push({ start, end, text });
+  });
+}
+
+// 解析 VTT
+function parseVTT() {
+  const content = state.subtitleContent.replace(/^WEBVTT\s*\n/, '');
+  const blocks = content.trim().split(/\n\s*\n/);
+  
+  blocks.forEach(block => {
+    const lines = block.trim().split('\n');
+    let timeLineIndex = lines.findIndex(l => l.includes('-->'));
+    if (timeLineIndex === -1) return;
+    
+    const timeMatch = lines[timeLineIndex].match(/(\d{2}):(\d{2}):(\d{2})[.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[.](\d{3})/);
+    if (!timeMatch) return;
+    
+    const start = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
+    const end = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
+    const text = lines.slice(timeLineIndex + 1).join('\n').replace(/<[^>]+>/g, '');
+    
+    state.parsedSubtitles.push({ start, end, text });
+  });
+}
+
+// 解析 ASS
+function parseASS() {
+  const lines = state.subtitleContent.split('\n');
+  let inEvents = false;
+  let format = [];
+  
+  lines.forEach(line => {
+    line = line.trim();
+    
+    if (line === '[Events]') {
+      inEvents = true;
+      return;
+    }
+    
+    if (line.startsWith('[') && line !== '[Events]') {
+      inEvents = false;
+      return;
+    }
+    
+    if (inEvents && line.startsWith('Format:')) {
+      format = line.replace('Format:', '').split(',').map(s => s.trim());
+      return;
+    }
+    
+    if (inEvents && line.startsWith('Dialogue:')) {
+      const parts = line.replace('Dialogue:', '').split(',');
+      const textIndex = format.indexOf('Text');
+      const startIndex = format.indexOf('Start');
+      const endIndex = format.indexOf('End');
+      
+      if (startIndex === -1 || endIndex === -1 || textIndex === -1) return;
+      
+      const start = parseASSTime(parts[startIndex]?.trim());
+      const end = parseASSTime(parts[endIndex]?.trim());
+      let text = parts.slice(textIndex).join(',').trim();
+      
+      // 移除 ASS 标签
+      text = text.replace(/\{[^}]*\}/g, '').replace(/\\N/g, '\n').replace(/\\n/g, '\n');
+      
+      state.parsedSubtitles.push({ start, end, text });
+    }
+  });
+}
+
+// 解析 ASS 时间格式
+function parseASSTime(timeStr) {
+  if (!timeStr) return 0;
+  const match = timeStr.match(/(\d+):(\d{2}):(\d{2})[.](\d{2})/);
+  if (!match) return 0;
+  return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
+}
+
+// 更新字幕显示
+function updateSubtitleDisplay() {
+  const currentTime = video.currentTime + state.params.timeOffset;
+  
+  // 查找当前应该显示的字幕
+  let foundIndex = -1;
+  for (let i = 0; i < state.parsedSubtitles.length; i++) {
+    const sub = state.parsedSubtitles[i];
+    if (currentTime >= sub.start && currentTime <= sub.end) {
+      foundIndex = i;
+      break;
+    }
+  }
+  
+  if (foundIndex === state.currentSubtitleIndex) return;
+  state.currentSubtitleIndex = foundIndex;
+  
+  // 清除旧字幕
+  overlay.innerHTML = '';
+  
+  if (foundIndex === -1) return;
+  
+  const sub = state.parsedSubtitles[foundIndex];
+  const lines = sub.text.split('\n');
+  
+  lines.forEach((line, index) => {
+    const div = document.createElement('div');
+    div.className = 'subtitle-line';
+    div.textContent = line;
+    
+    // 应用样式
+    applySubtitleStyle(div, index, lines.length);
+    
+    overlay.appendChild(div);
+  });
+}
+
+// 应用字幕样式
+function applySubtitleStyle(element, lineIndex, totalLines) {
+  const p = state.params;
+  
+  // 字体样式
+  element.style.fontSize = p.fontSize + 'px';
+  element.style.fontFamily = p.fontFamily;
+  element.style.color = p.fontColor;
+  element.style.fontWeight = p.fontWeight;
+  
+  // 描边效果
+  if (p.outlineWidth > 0) {
+    const oc = p.outlineColor;
+    const ow = p.outlineWidth;
+    element.style.textShadow = `
+      ${oc} ${ow}px 0,
+      ${oc} -${ow}px 0,
+      ${oc} 0 ${ow}px,
+      ${oc} 0 -${ow}px,
+      ${oc} ${ow}px ${ow}px,
+      ${oc} -${ow}px -${ow}px,
+      ${oc} ${ow}px -${ow}px,
+      ${oc} -${ow}px ${ow}px
+    `;
+  }
+  
+  // 阴影
+  if (p.shadowOffset > 0) {
+    element.style.textShadow += `, ${p.shadowOffset}px ${p.shadowOffset}px ${p.shadowOffset * 2}px rgba(0,0,0,0.8)`;
+  }
+  
+  // 背景
+  if (p.bgOpacity > 0) {
+    const opacity = p.bgOpacity / 100;
+    element.style.backgroundColor = `rgba(0, 0, 0, ${opacity})`;
+    element.style.padding = '4px 12px';
+    element.style.borderRadius = '4px';
+  }
+  
+  // 垂直位置
+  const lineHeight = p.fontSize * 1.4;
+  const totalHeight = lineHeight * totalLines;
+  
+  if (p.positionY === 'bottom') {
+    element.style.bottom = (p.marginBottom + (totalLines - 1 - lineIndex) * lineHeight) + 'px';
+    element.style.top = 'auto';
+  } else if (p.positionY === 'top') {
+    element.style.top = (p.marginTop + lineIndex * lineHeight) + 'px';
+    element.style.bottom = 'auto';
+  } else { // center
+    const centerOffset = (overlay.offsetHeight - totalHeight) / 2;
+    element.style.top = (centerOffset + lineIndex * lineHeight) + 'px';
+    element.style.bottom = 'auto';
+  }
+}
+
+// 更新参数
+function updateSubtitleParams() {
+  state.params.timeOffset = parseFloat(document.getElementById('timeOffset').value) || 0;
+  state.params.positionY = document.getElementById('positionY').value;
+  state.params.marginBottom = parseInt(document.getElementById('marginBottom').value) || 30;
+  state.params.marginTop = parseInt(document.getElementById('marginTop').value) || 30;
+  state.params.fontSize = parseInt(document.getElementById('fontSize').value) || 24;
+  state.params.fontFamily = document.getElementById('fontFamily').value;
+  state.params.fontColor = document.getElementById('fontColor').value;
+  state.params.fontWeight = document.getElementById('fontWeight').value;
+  state.params.outlineWidth = parseInt(document.getElementById('outlineWidth').value) || 0;
+  state.params.outlineColor = document.getElementById('outlineColor').value;
+  state.params.shadowOffset = parseInt(document.getElementById('shadowOffset').value) || 0;
+  state.params.bgOpacity = parseInt(document.getElementById('bgOpacity').value) || 0;
+  
+  state.currentSubtitleIndex = -1; // 强制刷新
+  updateSubtitleDisplay();
+}
+
+// 设置偏移量
+function setOffset(value) {
+  document.getElementById('timeOffset').value = value;
+  updateSubtitleParams();
+}
+
+// 视频控制
+function togglePlay() {
+  if (video.paused) {
+    video.play();
+    document.getElementById('playBtn').textContent = '⏸️';
+  } else {
+    video.pause();
+    document.getElementById('playBtn').textContent = '▶️';
+  }
+}
+
+function seek(seconds) {
+  video.currentTime += seconds;
+}
+
+function toggleMute() {
+  video.muted = !video.muted;
+  document.getElementById('muteBtn').textContent = video.muted ? '🔇' : '🔊';
+  document.getElementById('volumeSlider').value = video.muted ? 0 : video.volume * 100;
+}
+
+function setVolume(value) {
+  video.volume = value / 100;
+  video.muted = value === 0;
+  document.getElementById('muteBtn').textContent = value === 0 ? '🔇' : '🔊';
+}
+
+function setSpeed(value) {
+  video.playbackRate = parseFloat(value);
+}
+
+// 进度条事件
+progressBar.addEventListener('click', (e) => {
+  const rect = progressBar.getBoundingClientRect();
+  const percent = (e.clientX - rect.left) / rect.width;
+  video.currentTime = percent * video.duration;
+});
+
+video.addEventListener('timeupdate', () => {
+  const percent = (video.currentTime / video.duration) * 100;
+  progressFill.style.width = percent + '%';
+  progressHandle.style.left = percent + '%';
+  document.getElementById('currentTime').textContent = formatTime(video.currentTime);
+  
+  updateSubtitleDisplay();
+});
+
+video.addEventListener('loadedmetadata', () => {
+  document.getElementById('duration').textContent = formatTime(video.duration);
+});
+
+// 键盘快捷键
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  
+  switch (e.key) {
+    case ' ':
+      e.preventDefault();
+      togglePlay();
+      break;
+    case 'ArrowLeft':
+      seek(-5);
+      break;
+    case 'ArrowRight':
+      seek(5);
+      break;
+    case 'ArrowUp':
+      e.preventDefault();
+      setOffset(state.params.timeOffset + 0.5);
+      break;
+    case 'ArrowDown':
+      e.preventDefault();
+      setOffset(state.params.timeOffset - 0.5);
+      break;
+    case '[':
+      document.getElementById('fontSize').value = Math.max(12, state.params.fontSize - 2);
+      updateSubtitleParams();
+      break;
+    case ']':
+      document.getElementById('fontSize').value = Math.min(72, state.params.fontSize + 2);
+      updateSubtitleParams();
+      break;
+  }
+});
+
+// 应用到压制
+function applyToBurn() {
+  const params = {
+    timeOffset: state.params.timeOffset,
+    positionY: state.params.positionY,
+    marginBottom: state.params.marginBottom,
+    marginTop: state.params.marginTop,
+    fontSize: state.params.fontSize,
+    fontFamily: state.params.fontFamily,
+    fontColor: state.params.fontColor,
+    fontWeight: state.params.fontWeight,
+    outlineWidth: state.params.outlineWidth,
+    outlineColor: state.params.outlineColor,
+    shadowOffset: state.params.shadowOffset,
+    bgOpacity: state.params.bgOpacity
+  };
+  
+  // 存储到 localStorage 供主页使用
+  localStorage.setItem('subtitlePreviewParams', JSON.stringify(params));
+  showToast('参数已保存，请返回主页进行压制');
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+  // 尝试从 localStorage 加载之前的参数
+  const saved = localStorage.getItem('subtitlePreviewParams');
+  if (saved) {
+    try {
+      const params = JSON.parse(saved);
+      Object.assign(state.params, params);
+      
+      // 更新 UI
+      document.getElementById('timeOffset').value = params.timeOffset || 0;
+      document.getElementById('positionY').value = params.positionY || 'bottom';
+      document.getElementById('marginBottom').value = params.marginBottom || 30;
+      document.getElementById('marginTop').value = params.marginTop || 30;
+      document.getElementById('fontSize').value = params.fontSize || 24;
+      document.getElementById('fontFamily').value = params.fontFamily || 'sans-serif';
+      document.getElementById('fontColor').value = params.fontColor || '#ffffff';
+      document.getElementById('fontWeight').value = params.fontWeight || 'bold';
+      document.getElementById('outlineWidth').value = params.outlineWidth || 2;
+      document.getElementById('outlineColor').value = params.outlineColor || '#000000';
+      document.getElementById('shadowOffset').value = params.shadowOffset || 2;
+      document.getElementById('bgOpacity').value = params.bgOpacity || 0;
+      
+      // 更新显示值
+      document.getElementById('marginBottomVal').textContent = params.marginBottom || 30;
+      document.getElementById('marginTopVal').textContent = params.marginTop || 30;
+      document.getElementById('fontSizeVal').textContent = params.fontSize || 24;
+      document.getElementById('outlineWidthVal').textContent = params.outlineWidth || 2;
+      document.getElementById('shadowOffsetVal').textContent = params.shadowOffset || 2;
+      document.getElementById('bgOpacityVal').textContent = params.bgOpacity || 0;
+      document.getElementById('fontColorText').value = params.fontColor || '#ffffff';
+      document.getElementById('outlineColorText').value = params.outlineColor || '#000000';
+    } catch (e) {
+      console.error('Failed to load saved params:', e);
+    }
+  }
+});
+
+// ========== 媒体浏览器功能 ==========
+let mediaBrowserPath = '';
+let mediaBrowserMode = ''; // 'video' or 'subtitle'
+let mediaBrowserSelected = null;
+
+function showMediaBrowser() {
+  // 弹出选择对话框：选择视频还是字幕
+  const choice = confirm('点击"确定"选择视频文件，点击"取消"后将弹出选择字幕的窗口');
+  if (choice) {
+    mediaBrowserMode = 'video';
+  } else {
+    mediaBrowserMode = 'subtitle';
+  }
+  
+  mediaBrowserPath = '';
+  mediaBrowserSelected = null;
+  document.getElementById('mediaBrowserModal').style.display = 'flex';
+  document.getElementById('mediaBrowserConfirm').disabled = true;
+  document.getElementById('mediaBrowserSelection').textContent = mediaBrowserMode === 'video' ? '请选择视频文件' : '请选择字幕文件';
+  loadMediaBrowserContent('');
+}
+
+function closeMediaBrowser() {
+  document.getElementById('mediaBrowserModal').style.display = 'none';
+}
+
+async function loadMediaBrowserContent(path) {
+  mediaBrowserPath = path;
+  const list = document.getElementById('mediaBrowserList');
+  const breadcrumb = document.getElementById('mediaBrowserBreadcrumb');
+  
+  breadcrumb.textContent = '📁 /' + (path || '');
+  list.innerHTML = '<div style="text-align:center; color:#666; padding:40px;">加载中...</div>';
+  
+  try {
+    const response = await fetch('/api/media/list?path=' + encodeURIComponent(path));
+    if (!response.ok) throw new Error('加载失败');
+    
+    const data = await response.json();
+    list.innerHTML = '';
+    
+    // 返回上级目录
+    if (path) {
+      const parentPath = path.split('/').slice(0, -1).join('/');
+      const backItem = document.createElement('div');
+      backItem.style.cssText = 'padding:10px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:10px; font-size:13px; color:#999;';
+      backItem.innerHTML = '<span style="font-size:16px;">📁</span><span>.. 返回上级</span>';
+      backItem.onmouseover = () => backItem.style.background = '#222';
+      backItem.onmouseout = () => backItem.style.background = 'transparent';
+      backItem.onclick = () => loadMediaBrowserContent(parentPath);
+      list.appendChild(backItem);
+    }
+    
+    // 文件和文件夹列表
+    data.items.forEach(item => {
+      const ext = item.ext || '';
+      const isVideo = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v'].includes(ext);
+      const isSubtitle = ['.srt', '.vtt', '.ass', '.ssa', '.sub'].includes(ext);
+      
+      // 根据模式过滤
+      if (!item.is_dir) {
+        if (mediaBrowserMode === 'video' && !isVideo) return;
+        if (mediaBrowserMode === 'subtitle' && !isSubtitle) return;
+      }
+      
+      const itemDiv = document.createElement('div');
+      itemDiv.style.cssText = 'padding:10px 12px; cursor:pointer; border-radius:6px; display:flex; align-items:center; gap:10px; font-size:13px; border:1px solid transparent;';
+      
+      let icon = '📄';
+      if (item.is_dir) icon = '📁';
+      else if (isVideo) icon = '🎬';
+      else if (isSubtitle) icon = '💬';
+      
+      itemDiv.innerHTML = `
+        <span style="font-size:16px;">${icon}</span>
+        <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${item.name}</span>
+        <span style="color:#666; font-size:11px;">${item.is_dir ? '' : formatFileSize(item.size)}</span>
+      `;
+      
+      itemDiv.onmouseover = () => {
+        if (!item.is_dir && mediaBrowserSelected === item.path) return;
+        itemDiv.style.background = '#222';
+      };
+      itemDiv.onmouseout = () => {
+        if (!item.is_dir && mediaBrowserSelected === item.path) return;
+        itemDiv.style.background = 'transparent';
+      };
+      
+      if (item.is_dir) {
+        itemDiv.onclick = () => loadMediaBrowserContent(item.path);
+      } else {
+        itemDiv.onclick = () => {
+          mediaBrowserSelected = item.path;
+          document.getElementById('mediaBrowserConfirm').disabled = false;
+          document.getElementById('mediaBrowserSelection').textContent = '已选择: ' + item.name;
+          
+          // 高亮选中项
+          list.querySelectorAll('div').forEach(d => {
+            if (d.onclick && !d.innerHTML.includes('返回上级')) {
+              d.style.background = 'transparent';
+              d.style.borderColor = 'transparent';
+            }
+          });
+          itemDiv.style.background = 'rgba(59,130,246,0.2)';
+          itemDiv.style.borderColor = '#3b82f6';
+        };
+      }
+      
+      list.appendChild(itemDiv);
+    });
+    
+    if (list.children.length === 0 || (list.children.length === 1 && path)) {
+      list.innerHTML = '<div style="text-align:center; color:#666; padding:40px;">没有找到匹配的文件</div>';
+    }
+  } catch (error) {
+    list.innerHTML = '<div style="text-align:center; color:#ef4444; padding:40px;">加载失败: ' + error.message + '</div>';
+  }
+}
+
+function formatFileSize(bytes) {
+  if (!bytes) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) {
+    bytes /= 1024;
+    i++;
+  }
+  return bytes.toFixed(1) + ' ' + units[i];
+}
+
+async function confirmMediaSelection() {
+  if (!mediaBrowserSelected) return;
+  
+  const fileName = mediaBrowserSelected.split('/').pop();
+  
+  if (mediaBrowserMode === 'video') {
+    // 加载视频
+    try {
+      const videoUrl = '/api/media/stream?path=' + encodeURIComponent(mediaBrowserSelected);
+      video.src = videoUrl;
+      state.videoPath = mediaBrowserSelected;
+      
+      video.onloadedmetadata = () => {
+        document.getElementById('duration').textContent = formatTime(video.duration);
+        showToast('视频已加载: ' + fileName);
+      };
+      
+      video.onerror = () => {
+        showToast('视频加载失败', 'error');
+      };
+    } catch (error) {
+      showToast('加载视频失败: ' + error.message, 'error');
+    }
+  } else {
+    // 加载字幕
+    try {
+      const response = await fetch('/api/media/file?path=' + encodeURIComponent(mediaBrowserSelected));
+      if (!response.ok) throw new Error('获取失败');
+      
+      const data = await response.json();
+      state.subtitleContent = data.content;
+      state.subtitlePath = mediaBrowserSelected;
+      state.subtitleType = detectSubtitleType(fileName);
+      parseSubtitle();
+      showToast('字幕已加载: ' + fileName);
+    } catch (error) {
+      showToast('加载字幕失败: ' + error.message, 'error');
+    }
+  }
+  
+  closeMediaBrowser();
+}
+</script>
+</body>
+</html>

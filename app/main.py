@@ -310,6 +310,65 @@ async def history_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     return FileResponse("app/static/history.html")
 
+@app.get("/preview")
+async def preview_page(request: Request):
+    if not get_current_user(request):
+        return RedirectResponse("/login", status_code=302)
+    return FileResponse("app/static/preview.html")
+
+@app.get("/api/media/file")
+async def get_media_file(path: str, request: Request):
+    """获取媒体库中的文件内容（用于预览字幕）"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    # 安全检查：防止路径遍历
+    if ".." in path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    # 检查是否是字幕文件
+    subtitle_exts = ['.srt', '.vtt', '.ass', '.ssa', '.sub']
+    if full_path.suffix.lower() not in subtitle_exts:
+        raise HTTPException(400, "不是字幕文件")
+    
+    # 读取文件内容
+    try:
+        content = full_path.read_text(encoding='utf-8')
+    except UnicodeDecodeError:
+        try:
+            content = full_path.read_text(encoding='gbk')
+        except:
+            content = full_path.read_text(encoding='latin-1')
+    
+    return {"content": content, "filename": full_path.name, "type": full_path.suffix.lower()}
+
+@app.get("/api/media/stream")
+async def stream_media_file(path: str, request: Request):
+    """流式传输媒体文件（用于视频预览）"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    # 安全检查
+    if ".." in path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    # 检查是否是视频文件
+    video_exts = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v']
+    if full_path.suffix.lower() not in video_exts:
+        raise HTTPException(400, "不是视频文件")
+    
+    return FileResponse(full_path, media_type="video/mp4")
+
 @app.post("/api/login")
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
     import hashlib
@@ -365,13 +424,23 @@ async def burn_subtitle(user: str = Depends(require_auth),
                        codec: str = Form("libx264"),
                        style: str = Form(""),
                        sub_mode: str = Form("burn"),
-                       keep_original_sub: bool = Form(False)):
+                       keep_original_sub: bool = Form(False),
+                       preview_params: str = Form("")):
     video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
     if not video_files:
         raise HTTPException(404, "文件不存在")
     if task_id in tasks and tasks[task_id].get("status") in ("queued", "processing"):
         raise HTTPException(400, "任务已在队列中")
     params = {"video_name": video_name, "duration": duration, "crf": crf, "preset": preset, "codec": codec, "style": style, "sub_mode": sub_mode, "keep_original_sub": keep_original_sub}
+    
+    # 解析预览参数
+    if preview_params:
+        try:
+            params["preview_params"] = json.loads(preview_params)
+            logger.info(f"[任务 {task_id}] 使用预览参数: {params['preview_params']}")
+        except json.JSONDecodeError:
+            logger.warning(f"[任务 {task_id}] 预览参数解析失败，使用默认样式")
+    
     now = datetime.now().isoformat()
     tasks[task_id] = {"task_id": task_id, "user": user, "video_name": video_name, "status": "queued", "progress": 0, "params": params, "created_at": now}
     db_execute("""INSERT OR REPLACE INTO tasks (task_id, user, video_name, subtitle_name, status, progress, params, created_at)
@@ -590,6 +659,7 @@ async def burn_from_media(
     style: str = Form(""),
     sub_mode: str = Form("burn"),
     keep_original_sub: bool = Form(False),
+    preview_params: str = Form(""),
 ):
     """直接从媒体库添加烧录任务（不需要上传）"""
     logger.info(f"[媒体库烧录] 用户: {user}, codec: {codec}, crf: {crf}, preset: {preset}, sub_mode: {sub_mode}")
@@ -626,6 +696,14 @@ async def burn_from_media(
         "sub_mode": sub_mode,
         "keep_original_sub": keep_original_sub,
     }
+    
+    # 解析预览参数
+    if preview_params:
+        try:
+            params["preview_params"] = json.loads(preview_params)
+            logger.info(f"[任务 {task_id}] 使用预览参数: {params['preview_params']}")
+        except json.JSONDecodeError:
+            logger.warning(f"[任务 {task_id}] 预览参数解析失败，使用默认样式")
 
     now = datetime.now().isoformat()
     tasks[task_id] = {
@@ -709,6 +787,10 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     sub_mode = params.get("sub_mode", "burn")  # burn=压制字幕, soft=添加字幕轨道
     keep_original_sub = params.get("keep_original_sub", False)  # 是否保留原字幕轨道
     
+    # 预览参数
+    preview_params = params.get("preview_params", {})
+    time_offset = preview_params.get("timeOffset", 0)
+    
     # NVENC 预设映射
     nvenc_preset_map = {
         "ultrafast": "p1", "superfast": "p2", "veryfast": "p3",
@@ -720,6 +802,10 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     # 软字幕模式：添加字幕轨道（不重新编码视频）
     if sub_mode == "soft":
         cmd = ["ffmpeg", "-y", "-i", str(video_path), "-i", str(sub_path)]
+        
+        # 添加时间偏移
+        if time_offset != 0:
+            cmd.extend(["-itsoffset", str(time_offset)])
         
         # 映射流
         cmd.extend(["-map", "0:v:0", "-map", "0:a?"])
@@ -735,17 +821,36 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     # 硬字幕模式：压制字幕到画面
     sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
     vf_parts = [f"subtitles='{sub_escaped}'"]
+    
+    # 构建 ASS 样式字符串
     if sub_path.suffix.lower() in ['.srt', '.vtt']:
-        s = style or 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
-        vf_parts[0] += f":force_style='{s}'"
+        if style:
+            # 用户自定义样式
+            vf_parts[0] += f":force_style='{style}'"
+        elif preview_params:
+            # 使用预览参数生成样式
+            ass_style = _preview_params_to_ass_style(preview_params)
+            if ass_style:
+                vf_parts[0] += f":force_style='{ass_style}'"
+        else:
+            # 默认样式
+            default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
+            vf_parts[0] += f":force_style='{default_style}'"
+    
     vf = ",".join(vf_parts)
+    
+    # 添加时间偏移到输入
+    input_args = ["-y"]
+    if time_offset != 0:
+        input_args.extend(["-itsoffset", str(time_offset)])
+    input_args.extend(["-i", str(video_path)])
     
     # GPU 编码特殊处理
     # 注意：使用 subtitles 滤镜时不能用 -hwaccel cuda（会导致滤镜失败）
     # 必须让 FFmpeg 在 CPU 解码后应用字幕滤镜，再用 GPU 编码
     if codec == "h264_nvenc":
         return [
-            "ffmpeg", "-y", "-i", str(video_path),
+            "ffmpeg"] + input_args + [
             "-vf", vf, "-pix_fmt", "yuv420p",
             "-c:v", "h264_nvenc",
             "-preset", nvenc_preset,
@@ -756,7 +861,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         ]
     elif codec == "hevc_nvenc":
         return [
-            "ffmpeg", "-y", "-i", str(video_path),
+            "ffmpeg"] + input_args + [
             "-vf", vf, "-pix_fmt", "yuv420p",
             "-c:v", "hevc_nvenc",
             "-preset", nvenc_preset,
@@ -767,7 +872,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         ]
     elif codec == "h264_qsv":
         return [
-            "ffmpeg", "-y", "-i", str(video_path),
+            "ffmpeg"] + input_args + [
             "-vf", vf, "-pix_fmt", "yuv420p",
             "-c:v", "h264_qsv",
             "-preset", "medium", "-global_quality", str(crf),
@@ -778,13 +883,85 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     else:
         # CPU 编码
         return [
-            "ffmpeg", "-y", "-i", str(video_path),
+            "ffmpeg"] + input_args + [
             "-vf", vf, "-c:v", codec,
             "-crf", str(crf), "-preset", preset,
             "-c:a", "copy",
             "-map", "0:v:0", "-map", "0:a?",
             str(output_path)
         ]
+
+def _preview_params_to_ass_style(params):
+    """将预览参数转换为 ASS 样式字符串"""
+    styles = []
+    
+    # 字体大小
+    font_size = params.get("fontSize", 24)
+    styles.append(f"FontSize={font_size}")
+    
+    # 字体族
+    font_family = params.get("fontFamily", "sans-serif")
+    font_map = {
+        "sans-serif": "Arial",
+        "serif": "Times New Roman",
+        "monospace": "Courier New",
+        "Microsoft YaHei": "Microsoft YaHei",
+        "PingFang SC": "PingFang SC",
+        "SimHei": "SimHei",
+        "SimSun": "SimSun",
+        "KaiTi": "KaiTi"
+    }
+    ass_font = font_map.get(font_family, font_family)
+    styles.append(f"Fontname={ass_font}")
+    
+    # 字体颜色 (RRGGBB -> &HBBGGRR)
+    font_color = params.get("fontColor", "#ffffff")
+    ass_color = hex_to_ass_color(font_color, "00")
+    styles.append(f"PrimaryColour={ass_color}")
+    
+    # 字体粗细
+    font_weight = params.get("fontWeight", "bold")
+    if font_weight == "bold":
+        styles.append("Bold=1")
+    elif font_weight == "lighter":
+        styles.append("Bold=0")
+    
+    # 描边
+    outline_width = params.get("outlineWidth", 2)
+    outline_color = params.get("outlineColor", "#000000")
+    ass_outline_color = hex_to_ass_color(outline_color, "00")
+    styles.append(f"Outline={outline_width}")
+    styles.append(f"OutlineColour={ass_outline_color}")
+    
+    # 阴影
+    shadow_offset = params.get("shadowOffset", 2)
+    styles.append(f"Shadow={shadow_offset}")
+    
+    # 位置调整
+    position_y = params.get("positionY", "bottom")
+    margin_bottom = params.get("marginBottom", 30)
+    margin_top = params.get("marginTop", 30)
+    
+    if position_y == "top":
+        styles.append("Alignment=8")  # 顶部居中
+        styles.append(f"MarginV={margin_top}")
+    elif position_y == "center":
+        styles.append("Alignment=5")  # 居中
+    else:  # bottom
+        styles.append("Alignment=2")  # 底部居中
+        styles.append(f"MarginV={margin_bottom}")
+    
+    return ",".join(styles)
+
+def hex_to_ass_color(hex_color, alpha="00"):
+    """将十六进制颜色转换为 ASS 颜色格式 (&HAABBGGRR)"""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) == 6:
+        r = hex_color[0:2]
+        g = hex_color[2:4]
+        b = hex_color[4:6]
+        return f"&H{alpha}{b}{g}{r}"
+    return "&H00FFFFFF"
 
 PREVIEW_DIR = OUTPUT_DIR / "previews"
 PREVIEW_DIR.mkdir(exist_ok=True)
