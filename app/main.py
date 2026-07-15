@@ -1,6 +1,7 @@
 import os
 import json
 import os
+import sys
 import uuid
 import shutil
 import asyncio
@@ -21,14 +22,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import aiofiles
 
+# 配置日志输出到 stdout（Docker 日志捕获）
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    stream=sys.stdout,
+    force=True
+)
+logger = logging.getLogger("subtitle-burner")
+
 BASE_DIR = Path("/data")
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "/media"))
 
 # GPU 编码器检测
 import subprocess as _sp
-import logging as _logging
-
-_logger = _logging.getLogger("subtitle-burner")
 
 def _detect_encoders():
     """检测可用的硬件编码器"""
@@ -39,9 +47,9 @@ def _detect_encoders():
         for enc in encoders:
             if enc in output:
                 encoders[enc] = True
-        _logger.info(f"FFmpeg 编码器检测结果: {encoders}")
+        logger.info(f"FFmpeg 编码器检测结果: {encoders}")
     except Exception as e:
-        _logger.error(f"FFmpeg 编码器检测失败: {e}")
+        logger.error(f"FFmpeg 编码器检测失败: {e}")
     return encoders
 
 GPU_ENCODERS = _detect_encoders()
