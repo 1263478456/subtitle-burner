@@ -100,17 +100,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@6929e7d00a01e2ce44069b5fd2a4e8c83b8e2c47  # v4.1.7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ needs.resolve.outputs.tag }}
 
       - name: Generate changelog (Conventional Commits)
         id: changelog
-        uses: orhun/git-cliff-action@4c8d37a6674b8c4f1e6f5d5e6e4a6c0a0e6a0e6a  # v3
+        uses: orhun/git-cliff-action@v3
         with:
           tag: ${{ needs.resolve.outputs.tag }}
-          args: --strip header --tag-pattern v[0-9]+\.[0-9]+\.[0-9]+ | head -c 60000
+          args: --strip header --tag-pattern v[0-9]+\.[0-9]+\.[0-9]+
         env:
           OUTPUT: ./CHANGELOG_FRAGMENT.md
 
@@ -176,7 +176,7 @@ jobs:
           head -n 30 RELEASE_BODY.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@15393bb1aa9b56737b952d1b1e46904e4f6e3a5d  # v2.0.5
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name:     ${{ needs.resolve.outputs.tag }}
