@@ -316,11 +316,6 @@ window.setCodecOptions = setCodecOptions;
 window.resetForm = resetForm;
 let me = null, gpuStatus = null;
 
-// 兜底轮询：每 500ms 强制同步一次按钮状态（防止任何回调遗漏）
-setInterval(() => {
-  if (typeof checkReady === 'function') checkReady();
-}, 500);
-
 // 初始化
 (async () => {
   await Auth.init();
