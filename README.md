@@ -20,6 +20,8 @@
 | 📋 | 历史记录 + SQLite 持久化 | History with SQLite persistence |
 | 🐳 | CPU / GPU 双镜像 + Compose 一键启动 | CPU/GPU dual images + Compose |
 | 📡 | `/health` 健康探针 + OpenAPI 自动文档 | `/health` probe + OpenAPI docs |
+| ⚡ | FFmpeg 实时进度解析，精确到秒 | Real-time FFmpeg progress parsing |
+| 🔄 | 失败任务自动重试，批量总进度条 | Failed task retry + batch total progress |
 
 ## 🚀 快速开始 / Quick Start
 
@@ -142,7 +144,7 @@ FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1
 ## 🛠️ 技术栈 / Tech Stack
 
 - **后端 Backend**：Python 3.11 + FastAPI
-- **前端 Frontend**：原生 HTML/CSS/JS（无框架依赖 / no framework）
+- **前端 Frontend**：原生 HTML/CSS/JS，模块化拆分（`utils.js` / `auth.js` / `upload.js` / `media.js` / `queue.js`）
 - **数据库 Database**：SQLite
 - **核心 Core**：FFmpeg + libass
 - **容器 Container**：Docker + Docker Compose
@@ -198,152 +200,14 @@ docker compose up -d
 ```bash
 # 本地验证多架构构建
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -f app/Dockerfile.cpu -t subtitle-burner:dev --load .
+  -f app/Dockerfile.cpu \
+  -t subtitle-burner:test \
+  --push .
 ```
 
-### 手动发布流程 / Manual Release
+## ⚠️ 免责声明 / Disclaimer
 
-```bash
-# 在本地
-git tag v1.2.3
-git push origin v1.2.3
-# GitHub Actions 会自动构建并发布，5-10 分钟后即可：
-docker pull 1263478456/subtitle-burner:1.2.3
-```
-
-### 所需 Secrets / Required Secrets
-
-在 GitHub 仓库 **Settings → Secrets and variables → Actions** 中添加：
-
-| Secret | 用途 | 获取方式 |
-|---|---|---|
-| `DOCKERHUB_USERNAME` | Docker Hub 账号 | https://hub.docker.com/ |
-| `DOCKERHUB_TOKEN`    | Docker Hub Access Token | Docker Hub → Account Settings → Security → New Access Token |
-
-> Token 比密码更安全、且可独立吊销。
-
-### Conventional Commits / 提交规范
-
-本项目使用 Conventional Commits 规范，配合 `git-cliff` 自动生成 CHANGELOG：
-
-```bash
-feat: 新增 GPU NVENC 编码支持
-fix: 修复大文件上传超时
-docs: 更新 API 文档
-refactor: 重构队列调度
-chore: 升级依赖版本
-perf: 优化 ffmpeg 启动延迟
-```
-
-## 🧪 故障排查 / Troubleshooting
-
-<details>
-<summary><b>Q: 容器启动后立即退出？</b></summary>
-
-```bash
-docker compose logs app
-# 常见原因：端口被占用 → 修改 .env 中 BIND_PORT
-#           磁盘满   → docker system prune -a
-```
-</details>
-
-<details>
-<summary><b>Q: 中文/方块字体显示？</b></summary>
-
-需要把字体文件挂载进容器：
-```bash
-mkdir -p data/fonts
-cp /path/to/SourceHanSansCN-Regular.otf data/fonts/
-docker compose restart
-```
-</details>
-
-<details>
-<summary><b>Q: GPU 模式启动失败？</b></summary>
-
-```bash
-# 1. 检查 NVIDIA 驱动
-nvidia-smi
-# 2. 检查 Container Toolkit
-docker run --rm --runtime=nvidia --gpus all nvidia/cuda:12.0-base nvidia-smi
-# 3. 若 docker-compose 报 "unknown runtime nvidia"
-#    安装：https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
-```
-</details>
-
-<details>
-<summary><b>Q: IPv6-only 环境如何从外网访问？</b></summary>
-
-`BIND_HOST=[::]` 已默认监听双栈；如需 HTTPS，用 Caddy / Nginx 反代：
-```nginx
-server {
-  listen [::]:443 ssl http2;
-  server_name lobe.1129.ltd;
-  client_max_body_size 0;
-  location / {
-    proxy_pass http://[::1]:8000;
-  }
-}
-```
-</details>
-
-<details>
-<summary><b>Q: 升级后数据库报错？</b></summary>
-
-```bash
-# 保留 data/db/ 目录即可；如需迁移请看 docs/MIGRATION.md
-docker compose down
-docker compose pull
-docker compose up -d
-```
-</details>
-
-## 🛠️ 本地开发 / Local Development
-
-```bash
-# 克隆
-git clone https://github.com/1263478456/subtitle-burner.git
-cd subtitle-burner
-
-# 创建虚拟环境
-python -m venv .venv
-.venv\Scripts\activate    # Windows
-source .venv/bin/activate # Linux/macOS
-
-# 安装依赖
-pip install -r app/requirements.txt
-
-# 安装 ffmpeg（项目自带 Docker 镜像，开发机自行安装）
-# macOS:   brew install ffmpeg
-# Ubuntu:  sudo apt install ffmpeg libass-dev
-# Windows: https://www.gyan.dev/ffmpeg/builds/
-
-# 启动
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## 🤝 贡献 / Contributing
-
-欢迎 PR / Issue！
-
-1. Fork 仓库
-2. 创建分支：`git checkout -b feature/AmazingFeature`
-3. 提交改动：`git commit -m 'feat: add AmazingFeature'`
-4. 推送分支：`git push origin feature/AmazingFeature`
-5. 提交 Pull Request
-
-## 📄 许可证 / License
-
-[MIT](LICENSE)
-
-## 🙏 致谢 / Acknowledgments
-
-- [FFmpeg](https://ffmpeg.org/) - 强大的多媒体处理工具
-- [libass](https://github.com/libass/libass) - ASS/SSA 字幕渲染库
-- [FastAPI](https://fastapi.tiangolo.com/) - 现代化 Python Web 框架
-- [git-cliff](https://git-cliff.org/) - 自动生成 CHANGELOG
-
----
-
-⭐ 如果这个项目对你有帮助，欢迎点个 Star！
-If this project helps you, please give it a Star!
+> **本代码由 AI 生成，谨慎使用。**
+> 本项目部分或全部代码由人工智能辅助生成，未经过大规模生产环境验证。
+> 使用前请自行评估安全性、稳定性与合规性，作者不对直接使用造成的任何损失负责。
+> 建议在测试环境充分验证后再部署到生产环境。
