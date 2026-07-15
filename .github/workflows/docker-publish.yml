@@ -3,8 +3,6 @@ name: docker-publish
 on:
   push:
     tags: ['v*.*.*']
-    paths:
-      - 'README.md'
   workflow_dispatch:
 
 permissions:
