@@ -234,7 +234,30 @@ async def lifespan(app):
 
 app = FastAPI(title="字幕烧录工具", version="2.1", lifespan=lifespan, docs_url="/docs", redoc_url="/redoc")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+# 自定义静态文件类：禁用缓存，确保前端代码更新立即生效
+from starlette.responses import Response as StarletteResponse
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if isinstance(response, StarletteResponse):
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+app.mount("/static", NoCacheStaticFiles(directory="app/static"), name="static")
+
+# 主页也禁用缓存
+from starlette.responses import FileResponse as _FR
+
+class NoCacheFileResponse(_FR):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        self.headers["Pragma"] = "no-cache"
+        self.headers["Expires"] = "0"
 
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)

@@ -241,7 +241,7 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
       </div>
 
       <div class="actions">
-        <button class="btn btn-primary" id="burnBtn" disabled onclick="if(!this.disabled) Queue.startBurn()">🚀 开始烧录</button>
+        <button class="btn btn-primary" id="burnBtn" onclick="if(!this.disabled&&Queue&&Queue.startBurn) Queue.startBurn()">🚀 开始烧录</button>
         <button class="btn btn-ghost" onclick="resetForm()">重置</button>
       </div>
     </div>
@@ -345,6 +345,9 @@ setInterval(() => {
   // 进入页面后刷新一次按钮状态
   checkReady();
   Queue.pollTasks();
+
+  // 暴露一个手动调用入口给用户测试
+  console.log('[init] ready. Try: checkReady() to refresh, Media.getPairs().length to see pairs');
 })();
 </script>
 </body>
