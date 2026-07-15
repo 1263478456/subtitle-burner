@@ -23,8 +23,8 @@ header h1 { font-size: 18px;
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
 nav { display: flex; gap: 8px; }
-nav a { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
-nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--primary); }
+nav a, nav button { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; background: transparent; border: none; cursor: pointer; }
+nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgba(59,130,246,0.1); color: var(--primary); }
 .user { color: var(--muted); font-size: 13px; margin-right: 12px; }
 .user button { padding: 6px 12px; background: transparent; color: var(--muted);
               border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
@@ -148,6 +148,69 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 .pair-empty { color: var(--dim); font-size: 12px; text-align: center;
               padding: 12px; background: #f8fafc; border-radius: 6px;
               border: 1px dashed var(--border); }
+
+/* 预览面板样式 */
+.preview-panel {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  background: #0f0f0f;
+}
+.preview-panel.active {
+  display: flex;
+  flex-direction: column;
+}
+.preview-header {
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.preview-header h2 {
+  font-size: 15px;
+  background: linear-gradient(135deg, var(--primary), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin: 0;
+}
+.preview-actions {
+  display: flex;
+  gap: 8px;
+}
+.preview-actions button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 12px;
+}
+.preview-actions button:hover {
+  color: #fff;
+  border-color: var(--primary);
+}
+.preview-actions .btn-close {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.preview-actions .btn-close:hover {
+  background: #ef4444;
+  color: #fff;
+}
+.preview-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  height: 100%;
+}
 </style>
 </head>
 <body>
@@ -155,7 +218,7 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
   <h1>🔥 字幕烧录工具</h1>
   <nav>
     <a class="active">主控制台</a>
-    <a href="/preview">字幕预览</a>
+    <button onclick="togglePreview()">🎬 字幕预览</button>
     <a href="/history">历史记录</a>
   </nav>
   <div class="user">
@@ -163,6 +226,18 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
     <button onclick="Auth.logout()">退出</button>
   </div>
 </header>
+
+<!-- 预览面板 -->
+<div class="preview-panel" id="previewPanel">
+  <div class="preview-header">
+    <h2>🎬 字幕预览</h2>
+    <div class="preview-actions">
+      <button onclick="openPreviewNewTab()">↗ 新窗口打开</button>
+      <button class="btn-close" onclick="togglePreview()">✕ 关闭预览</button>
+    </div>
+  </div>
+  <iframe class="preview-iframe" id="previewIframe" src="about:blank"></iframe>
+</div>
 
 <div class="container">
   <div class="grid">
@@ -293,6 +368,44 @@ window.toast = Utils.toast;
 
 // 全局状态
 window.mode = 'upload';
+
+// 预览面板控制
+let previewLoaded = false;
+
+function togglePreview() {
+  const panel = document.getElementById('previewPanel');
+  const iframe = document.getElementById('previewIframe');
+  
+  if (panel.classList.contains('active')) {
+    // 关闭预览
+    panel.classList.remove('active');
+    iframe.src = 'about:blank';
+    previewLoaded = false;
+    document.body.style.overflow = '';
+  } else {
+    // 打开预览
+    panel.classList.add('active');
+    if (!previewLoaded) {
+      iframe.src = '/preview';
+      previewLoaded = true;
+    }
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+function openPreviewNewTab() {
+  window.open('/preview', '_blank');
+}
+
+// ESC 键关闭预览
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const panel = document.getElementById('previewPanel');
+    if (panel.classList.contains('active')) {
+      togglePreview();
+    }
+  }
+});
 
 const setCodecOptions = (gpu) => {
   const sel = $('#codec');
