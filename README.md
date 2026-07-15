@@ -46,6 +46,153 @@ docker compose --profile gpu up -d
 
 ---
 
+## 📋 完整配置示例 / Complete Examples
+
+### CPU 模式 (docker-compose.yml)
+
+```yaml
+services:
+  subtitle-burner:
+    image: 1263478456/subtitle-burner:latest
+    container_name: subtitle-burner
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your_secure_password_here
+      - SESSION_SECRET=your_random_secret_at_least_32_chars
+      - MEDIA_ROOT=/media
+    volumes:
+      - ./data:/data
+      - /path/to/your/videos:/media  # 修改为你的媒体目录
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+```
+
+### GPU 模式 (docker-compose.yml)
+
+```yaml
+services:
+  subtitle-burner-gpu:
+    image: 1263478456/subtitle-burner:latest-gpu
+    container_name: subtitle-burner-gpu
+    restart: unless-stopped
+    ports:
+      - "8000:8000"  # 或使用 8001:8000 避免与其他服务冲突
+    environment:
+      - TZ=Asia/Shanghai
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your_secure_password_here
+      - SESSION_SECRET=your_random_secret_at_least_32_chars
+      - MEDIA_ROOT=/media
+    volumes:
+      - ./data:/data
+      - /path/to/your/videos:/media  # 修改为你的媒体目录
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1  # 使用 GPU数量，或 "all"
+              capabilities: [gpu, video, compute, utility]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+```
+
+### 同时运行 CPU + GPU
+
+```yaml
+services:
+  # CPU 服务 - 端口 8000
+  subtitle-burner:
+    image: 1263478456/subtitle-burner:latest
+    container_name: subtitle-burner
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your_secure_password_here
+      - SESSION_SECRET=your_random_secret_at_least_32_chars
+    volumes:
+      - ./data:/data
+      - /path/to/your/videos:/media
+
+  # GPU 服务 - 端口 8001
+  subtitle-burner-gpu:
+    image: 1263478456/subtitle-burner:latest-gpu
+    container_name: subtitle-burner-gpu
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      - TZ=Asia/Shanghai
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your_secure_password_here
+      - SESSION_SECRET=your_random_secret_at_least_32_chars
+    volumes:
+      - ./data:/data
+      - /path/to/your/videos:/media
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video, compute, utility]
+```
+
+### TrueNAS Scale 部署示例
+
+```yaml
+# TrueNAS Scale 应用配置
+services:
+  subtitle-burner:
+    image: 1263478456/subtitle-burner:latest-gpu
+    container_name: subtitle-burner
+    restart: unless-stopped
+    network_mode: bridge
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=your_secure_password_here
+      - SESSION_SECRET=your_random_secret_at_least_32_chars
+      - MEDIA_ROOT=/media
+    volumes:
+      - /mnt/pool/apps/subtitle-burner/data:/data
+      - /mnt/pool/media:/media  # 你的媒体库路径
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video, compute, utility]
+```
+
+> 💡 **提示**：
+> - 修改 `your_secure_password_here` 为强密码
+> - 修改 `your_random_secret_at_least_32_chars` 为随机字符串（可用 `openssl rand -hex 32` 生成）
+> - 修改 `/path/to/your/videos` 为你的实际媒体目录
+> - GPU模式需要主机已安装 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+
+---
+
 ## ✨ 特性 / Features
 
 - 🎯 多格式支持：ASS / SSA / SRT / VTT / Sub
