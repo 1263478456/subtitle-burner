@@ -1,6 +1,13 @@
-// auth.js — 认证与会话管理
+// auth.js — 认证与会话管理（惰性依赖 Utils，避免加载顺序问题）
 const Auth = (() => {
-  const { $, toast } = Utils;
+  const $ = (s) => document.querySelector(s);
+  const toast = (msg, kind) => {
+    const t = document.querySelector('#toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'toast show ' + (kind || 'success');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  };
   let currentUser = null;
 
   const getCurrentUser = () => currentUser;

@@ -1,6 +1,14 @@
-// media.js — 媒体库浏览与配对逻辑
+// media.js — 媒体库浏览与配对逻辑（惰性依赖 Utils，避免加载顺序问题）
 const Media = (() => {
-  const { $, $$, toast } = Utils;
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => Array.from(document.querySelectorAll(s));
+  const toast = (msg, kind) => {
+    const t = document.querySelector('#toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.className = 'toast show ' + (kind || 'success');
+    setTimeout(() => t.classList.remove('show'), 3000);
+  };
   let mediaPath = '';
   let selectedVideoMedia = null;
   let selectedSubMedia = null;

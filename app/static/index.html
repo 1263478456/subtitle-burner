@@ -260,13 +260,16 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.1); color: var(--prima
 
 <div class="toast" id="toast"></div>
 
-<script src="/static/js/auth.js"></script>
+<script>
+// 先加载工具模块（Utils 提供 $ $$ toast 等）
+</script>
 <script src="/static/js/utils.js"></script>
+<script src="/static/js/auth.js"></script>
 <script src="/static/js/upload.js"></script>
 <script src="/static/js/media.js"></script>
 <script src="/static/js/queue.js"></script>
 <script>
-// 全局状态（必须在模块脚本加载完之后才能用 $ 等工具）
+// 全局状态
 window.mode = 'upload';
 
 const setCodecOptions = (gpu) => {
