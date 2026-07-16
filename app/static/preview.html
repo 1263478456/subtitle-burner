@@ -486,6 +486,7 @@ const state = {
   subtitleType: null,
   parsedSubtitles: [],
   currentSubtitleIndex: -1,
+  videoDuration: 0, // 从响应头获取的 duration
   params: {
     timeOffset: 0,
     positionY: 'bottom',
@@ -631,14 +632,29 @@ function setOffset(value) {
 // 视频事件
 function setupVideoEvents() {
   video.addEventListener('timeupdate', () => {
-    const percent = (video.currentTime / video.duration) * 100;
+    const duration = video.duration || state.videoDuration;
+    if (!duration || isNaN(duration)) return;
+    
+    const percent = (video.currentTime / duration) * 100;
     document.getElementById('progressFill').style.width = percent + '%';
     document.getElementById('currentTime').textContent = formatTime(video.currentTime);
     updateSubtitleDisplay();
   });
   
   video.addEventListener('loadedmetadata', () => {
-    document.getElementById('duration').textContent = formatTime(video.duration);
+    // 如果 video.duration 无效，使用我们获取的 duration
+    const duration = video.duration && isFinite(video.duration) ? video.duration : state.videoDuration;
+    if (duration && duration > 0) {
+      document.getElementById('duration').textContent = formatTime(duration);
+    }
+  });
+  
+  // 添加 durationchange 事件
+  video.addEventListener('durationchange', () => {
+    const duration = video.duration && isFinite(video.duration) ? video.duration : state.videoDuration;
+    if (duration && duration > 0) {
+      document.getElementById('duration').textContent = formatTime(duration);
+    }
   });
   
   video.addEventListener('play', () => {
@@ -653,11 +669,16 @@ function setupVideoEvents() {
   const progressBar = document.getElementById('progressBar');
   let isDragging = false;
   
+  function getDuration() {
+    return video.duration && isFinite(video.duration) ? video.duration : state.videoDuration;
+  }
+  
   function updateProgress(e) {
     const rect = progressBar.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    if (video.duration && !isNaN(video.duration)) {
-      video.currentTime = percent * video.duration;
+    const duration = getDuration();
+    if (duration && duration > 0) {
+      video.currentTime = percent * duration;
     }
   }
   
@@ -1082,7 +1103,26 @@ async function confirmSelection() {
   if (mediaBrowserMode === 'video') {
     // 使用预览流转码 API（自动处理 EAC3 等不兼容音频）
     const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(selectedPath);
-    video.src = videoUrl;
+    
+    // 使用 fetch 获取响应头中的 duration
+    try {
+      const response = await fetch(videoUrl);
+      const durationHeader = response.headers.get('X-Video-Duration');
+      
+      if (durationHeader) {
+        state.videoDuration = parseFloat(durationHeader);
+      }
+      
+      // 创建 blob URL 并设置到 video 元素
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      video.src = blobUrl;
+      
+    } catch (e) {
+      // 如果 fetch 失败，直接设置 src 让 video 元素处理
+      video.src = videoUrl;
+    }
+    
     state.videoPath = selectedPath;
     document.getElementById('videoName').textContent = fileName;
     showToast('视频已加载: ' + fileName);
@@ -1092,7 +1132,7 @@ async function confirmSelection() {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && data.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(data.audio_codec)) {
-          showToast('音频格式 ' + data.audio_codec + ' 将自动转码为 AAC', 'success');
+          showToast('音频格式 ' + data.audio_codec + ' 已转码为 AAC', 'success');
         }
       })
       .catch(() => {}); // 忽略探测失败
