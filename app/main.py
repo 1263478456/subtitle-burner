@@ -471,6 +471,7 @@ async def preview_stream_media(
     # 需要转码（音频不兼容或需要片段转码）
     import tempfile
     import hashlib
+    import time as _time  # 导入 time 模块
     
     # 生成临时文件名（包含时间参数）
     hash_name = hashlib.md5(f"{full_path}_{start}_{duration}".encode()).hexdigest()[:16]
@@ -480,7 +481,7 @@ async def preview_stream_media(
     
     # 检查缓存是否存在（5分钟内的缓存有效）
     if temp_file.exists():
-        cache_age = time.time() - temp_file.stat().st_mtime
+        cache_age = _time.time() - temp_file.stat().st_mtime
         if cache_age < 300:  # 5分钟缓存
             logger.info(f"[预览流] 使用缓存: {temp_file}")
             return FileResponse(
@@ -520,22 +521,23 @@ async def preview_stream_media(
     
     logger.info(f"[预览流] 开始转码: {full_path.name} [{start}s - {start + duration}s]")
     
-    # 执行转码
+    # 执行转码（start=0 时需要更长时间处理 MKV 索引）
+    timeout = 300 if start == 0 else 120  # start=0 时给 5分钟超时
+    
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=120)
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout)
         if result.returncode != 0:
             logger.error(f"[预览流] 转码失败: {result.stderr.decode()[-500:]}")
             # 如果片段转码失败，尝试返回原文件
-            if start == 0:
-                return FileResponse(full_path, media_type="video/mp4")
-            raise HTTPException(500, "转码失败")
+            return FileResponse(full_path, media_type="video/mp4")
         logger.info(f"[预览流] 转码完成: {temp_file}")
     except subprocess.TimeoutExpired:
-        logger.error("[预览流] 转码超时")
-        raise HTTPException(500, "转码超时")
+        logger.error(f"[预览流] 转码超时 ({timeout}秒)")
+        # 超时时返回原文件（可能没声音但至少能看到画面）
+        return FileResponse(full_path, media_type="video/mp4")
     except Exception as e:
         logger.error(f"[预览流] 转码异常: {e}")
-        raise HTTPException(500, f"转码异常: {str(e)}")
+        return FileResponse(full_path, media_type="video/mp4")
     
     return FileResponse(
         temp_file, 
