@@ -491,15 +491,17 @@ async def preview_stream_media(
             )
     
     # 构建 FFmpeg 命令
-    # 策略：降低分辨率和质量来加快转码速度，同时保持帧精确
-    cmd = ["ffmpeg", "-y"]
+    # 混合策略：
+    # - start=0：直接转码，不需要 seek
+    # - start>0：使用 input seeking（-ss 在 -i 前面），速度快
+    #   从 FFmpeg 2.1 开始，转码模式下的 input seeking 也是帧精确的
+    cmd = ["ffmpeg", "-y", "-fflags", "+genpts"]  # 生成 PTS 保证精度
     
-    # -ss 放在 -i 后面是 output seeking，保证帧精确
-    # 虽然比 input seeking 慢，但对于低分辨率视频可以接受
-    cmd.extend(["-i", str(full_path)])
-    
+    # 对于 start>0，使用 input seeking（快速）
     if start > 0:
         cmd.extend(["-ss", str(start)])
+    
+    cmd.extend(["-i", str(full_path)])
     
     # 限制输出时长
     if duration > 0:
@@ -514,6 +516,7 @@ async def preview_stream_media(
         "-c:a", "aac",               # 音频转码为 AAC
         "-b:a", "96k",               # 较低的音频比特率
         "-ac", "2",                  # 立体声
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         str(temp_file)
     ])
