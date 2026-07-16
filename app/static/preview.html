@@ -292,7 +292,6 @@ input[type="range"]::-webkit-slider-thumb {
     <button class="btn btn-ghost btn-sm" onclick="openQueueModal()">📋 待压制队列</button>
     <button class="btn btn-ghost btn-sm" onclick="openInNewTab()" title="在新标签页打开">↗ 新窗口</button>
     <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 添加到队列</button>
-    <button class="btn btn-ghost btn-sm" onclick="openAboutModal()">关于</button>
   </div>
 </header>
 
@@ -492,63 +491,6 @@ input[type="range"]::-webkit-slider-thumb {
       <div class="actions">
         <button class="btn btn-ghost btn-sm" onclick="clearQueue()">清空队列</button>
         <button class="btn btn-primary btn-sm" id="startBurnBtn" onclick="startBatchBurn()" disabled>🔥 开始压制</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 关于弹窗 -->
-<div class="modal-overlay" id="aboutModal">
-  <div class="modal" style="width:450px;">
-    <div class="modal-header">
-      <h3>🎬 字幕烧录工具</h3>
-      <button class="modal-close" onclick="closeAboutModal()">✕</button>
-    </div>
-    <div style="padding:20px;">
-      <div style="text-align:center; margin-bottom:20px;">
-        <div style="font-size:48px; margin-bottom:12px;">🎬</div>
-        <div style="font-size:18px; font-weight:600; color:#e5e5e5;">字幕烧录工具</div>
-        <div style="font-size:14px; color:#999; margin-top:4px;">Subtitle Burner</div>
-      </div>
-      
-      <div style="background:#222; border-radius:8px; padding:16px; margin-bottom:16px;">
-        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-          <span style="color:#999; font-size:13px;">版本号</span>
-          <span id="aboutVersion" style="color:#e5e5e5; font-size:13px; font-family:monospace;">加载中...</span>
-        </div>
-        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
-          <span style="color:#999; font-size:13px;">运行状态</span>
-          <span id="aboutStatus" style="color:#10b981; font-size:13px;">● 运行中</span>
-        </div>
-        <div style="display:flex; justify-content:space-between;">
-          <span style="color:#999; font-size:13px;">FFmpeg</span>
-          <span id="aboutFFmpeg" style="color:#e5e5e5; font-size:13px;">检测中...</span>
-        </div>
-      </div>
-      
-      <div style="margin-bottom:16px;">
-        <div style="color:#999; font-size:12px; margin-bottom:8px;">相关链接</div>
-        <div style="display:flex; flex-direction:column; gap:8px;">
-          <a href="https://github.com/1263478456/subtitle-burner" target="_blank" style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#222; border-radius:6px; text-decoration:none; color:#e5e5e5; font-size:13px;">
-            <span>📦</span>
-            <span>GitHub 仓库</span>
-            <span style="color:#666; margin-left:auto; font-size:11px;">github.com</span>
-          </a>
-          <a href="https://hub.docker.com/r/1263478456/subtitle-burner" target="_blank" style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#222; border-radius:6px; text-decoration:none; color:#e5e5e5; font-size:13px;">
-            <span>🐳</span>
-            <span>Docker Hub</span>
-            <span style="color:#666; margin-left:auto; font-size:11px;">hub.docker.com</span>
-          </a>
-          <a href="/docs" target="_blank" style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#222; border-radius:6px; text-decoration:none; color:#e5e5e5; font-size:13px;">
-            <span>📖</span>
-            <span>API 文档</span>
-            <span style="color:#666; margin-left:auto; font-size:11px;">Swagger UI</span>
-          </a>
-        </div>
-      </div>
-      
-      <div style="text-align:center; color:#666; font-size:11px;">
-        基于 FFmpeg + libass 构建 · 支持 GPU 加速
       </div>
     </div>
   </div>
@@ -1548,31 +1490,6 @@ async function startBatchBurn() {
   }
   
   closeQueueModal();
-}
-
-// 关于弹窗
-function openAboutModal() {
-  document.getElementById('aboutModal').classList.add('active');
-  loadAboutInfo();
-}
-
-function closeAboutModal() {
-  document.getElementById('aboutModal').classList.remove('active');
-}
-
-async function loadAboutInfo() {
-  try {
-    const response = await fetch('/api/health');
-    if (response.ok) {
-      const data = await response.json();
-      document.getElementById('aboutVersion').textContent = data.version || 'v3.x.x';
-      document.getElementById('aboutFFmpeg').textContent = data.ffmpeg ? '✓ 已安装' : '✗ 未安装';
-      document.getElementById('aboutFFmpeg').style.color = data.ffmpeg ? '#10b981' : '#ef4444';
-    }
-  } catch (error) {
-    document.getElementById('aboutVersion').textContent = '获取失败';
-    document.getElementById('aboutFFmpeg').textContent = '获取失败';
-  }
 }
 
 // 在新标签页打开

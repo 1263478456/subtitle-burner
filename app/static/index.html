@@ -220,12 +220,70 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
     <a class="active">主控制台</a>
     <button onclick="togglePreview()">🎬 字幕预览</button>
     <a href="/history">历史记录</a>
+    <button onclick="openAboutModal()">关于</button>
   </nav>
   <div class="user">
     <span id="userName"></span>
     <button onclick="Auth.logout()">退出</button>
   </div>
 </header>
+
+<!-- 关于弹窗 -->
+<div id="aboutModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:12px; width:450px; max-height:80vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div style="padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:16px; margin:0;">🎬 字幕烧录工具</h3>
+      <button onclick="closeAboutModal()" style="background:none; border:none; cursor:pointer; font-size:18px; color:#999;">✕</button>
+    </div>
+    <div style="padding:20px;">
+      <div style="text-align:center; margin-bottom:20px;">
+        <div style="font-size:48px; margin-bottom:12px;">🎬</div>
+        <div style="font-size:20px; font-weight:600; color:#1e293b;">字幕烧录工具</div>
+        <div style="font-size:14px; color:#64748b; margin-top:4px;">Subtitle Burner</div>
+      </div>
+      
+      <div style="background:#f8fafc; border-radius:8px; padding:16px; margin-bottom:16px; border:1px solid #e2e8f0;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+          <span style="color:#64748b; font-size:13px;">版本号</span>
+          <span id="aboutVersion" style="color:#1e293b; font-size:13px; font-family:monospace;">加载中...</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+          <span style="color:#64748b; font-size:13px;">运行状态</span>
+          <span style="color:#10b981; font-size:13px;">● 运行中</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:#64748b; font-size:13px;">FFmpeg</span>
+          <span id="aboutFFmpeg" style="color:#1e293b; font-size:13px;">检测中...</span>
+        </div>
+      </div>
+      
+      <div style="margin-bottom:16px;">
+        <div style="color:#64748b; font-size:12px; margin-bottom:8px;">相关链接</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <a href="https://github.com/1263478456/subtitle-burner" target="_blank" style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; text-decoration:none; color:#1e293b; font-size:13px;">
+            <span>📦</span>
+            <span>GitHub 仓库</span>
+            <span style="color:#94a3b8; margin-left:auto; font-size:11px;">github.com</span>
+          </a>
+          <a href="https://hub.docker.com/r/1263478456/subtitle-burner" target="_blank" style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; text-decoration:none; color:#1e293b; font-size:13px;">
+            <span>🐳</span>
+            <span>Docker Hub</span>
+            <span style="color:#94a3b8; margin-left:auto; font-size:11px;">hub.docker.com</span>
+          </a>
+          <a href="/docs" target="_blank" style="display:flex; align-items:center; gap:8px; padding:10px 12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; text-decoration:none; color:#1e293b; font-size:13px;">
+            <span>📖</span>
+            <span>API 文档</span>
+            <span style="color:#94a3b8; margin-left:auto; font-size:11px;">Swagger UI</span>
+          </a>
+        </div>
+      </div>
+      
+      <div style="text-align:center; color:#94a3b8; font-size:11px;">
+        基于 FFmpeg + libass 构建 · 支持 GPU 加速
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- 预览面板 -->
 <div class="preview-panel" id="previewPanel">
@@ -360,6 +418,38 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
 <script src="/static/js/media.js"></script>
 <script src="/static/js/queue.js"></script>
 <script>
+// 关于弹窗
+function openAboutModal() {
+  document.getElementById('aboutModal').style.display = 'flex';
+  loadAboutInfo();
+}
+
+function closeAboutModal() {
+  document.getElementById('aboutModal').style.display = 'none';
+}
+
+async function loadAboutInfo() {
+  try {
+    const response = await fetch('/api/health');
+    if (response.ok) {
+      const data = await response.json();
+      document.getElementById('aboutVersion').textContent = 'v' + (data.version || '未知');
+      document.getElementById('aboutFFmpeg').textContent = data.ffmpeg ? '✓ 已安装' : '✗ 未安装';
+      document.getElementById('aboutFFmpeg').style.color = data.ffmpeg ? '#10b981' : '#ef4444';
+    }
+  } catch (error) {
+    document.getElementById('aboutVersion').textContent = '获取失败';
+    document.getElementById('aboutFFmpeg').textContent = '获取失败';
+  }
+}
+
+// 点击背景关闭关于弹窗
+document.getElementById('aboutModal').addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeAboutModal();
+  }
+});
+
 // 把 Utils 的常用工具挂到 window 上，避免重复定义
 window.$ = Utils.$;
 window.$$ = Utils.$$;
