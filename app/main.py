@@ -491,30 +491,26 @@ async def preview_stream_media(
             )
     
     # 构建 FFmpeg 命令
-    cmd = ["ffmpeg", "-y"]
+    cmd = ["ffmpeg", "-y", "-noaccurate_seek"]  # 使用快速跳转模式
     
-    # 如果有起始时间，使用 -ss 跳转（放在 -i 前面是快速跳转）
+    # -ss 放在 -i 前面是快速跳转模式（input seeking）
+    # 对于 MKV 文件，这可能需要重建索引，但比放在后面快
     if start > 0:
         cmd.extend(["-ss", str(start)])
     
     cmd.extend(["-i", str(full_path)])
     
-    # 如果有起始时间，限制输出时长
-    if start > 0 and duration > 0:
+    # 限制输出时长
+    if duration > 0:
         cmd.extend(["-t", str(duration)])
     
-    # 编码参数
-    if audio_codec in BROWSER_AUDIO_CODECS:
-        # 音频兼容，只处理视频片段
-        cmd.extend(["-c:v", "copy", "-c:a", "copy"])
-    else:
-        # 需要转码音频
-        cmd.extend([
-            "-c:v", "copy",
-            "-c:a", "aac", "-b:a", "192k", "-ac", "2"
-        ])
-    
+    # 编码参数 - 只转码音频，视频直接复制
     cmd.extend([
+        "-c:v", "copy",           # 视频直接复制（不重新编码）
+        "-c:a", "aac",            # 音频转码为 AAC
+        "-b:a", "128k",           # 音频比特率
+        "-ac", "2",               # 立体声
+        "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         str(temp_file)
     ])
