@@ -25,8 +25,15 @@ const Queue = (() => {
   const fmtETA = (seconds) => {
     if (!seconds || seconds < 0) return '';
     if (seconds < 60) return Math.ceil(seconds) + '秒';
-    if (seconds < 3600) return Math.floor(seconds / 60) + '分' + Math.ceil(seconds % 60) + '秒';
-    return Math.floor(seconds / 3600) + '时' + Math.floor((seconds % 3600) / 60) + '分';
+    if (seconds < 3600) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.ceil(seconds % 60);
+      return mins + '分' + secs + '秒';
+    }
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.ceil(seconds % 60);
+    return hours + '时' + mins + '分' + secs + '秒';
   };
 
   const updateTaskUI = (t) => {
