@@ -1181,6 +1181,11 @@ async function loadAudioForSegment(path, startTime) {
     statusEl.style.display = 'block';
   }
   
+  // 暂停当前音频
+  if (state.audioElement) {
+    state.audioElement.pause();
+  }
+  
   try {
     const audioUrl = `/api/media/audio-transcode?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
     const response = await fetch(audioUrl);
@@ -1197,31 +1202,49 @@ async function loadAudioForSegment(path, startTime) {
     const audioBlob = await response.blob();
     const audioObjUrl = URL.createObjectURL(audioBlob);
     
-    // 创建音频元素播放
+    // 创建或更新音频元素
     if (!state.audioElement) {
       state.audioElement = new Audio();
-      state.audioElement.addEventListener('ended', () => {
-        // 音频播放结束，可以加载下一段
+      
+      // 同步视频和音频的播放状态（只绑定一次）
+      video.addEventListener('play', () => {
+        if (state.audioElement && state.audioElement.src) {
+          state.audioElement.play().catch(() => {});
+        }
+      });
+      
+      video.addEventListener('pause', () => {
+        if (state.audioElement) {
+          state.audioElement.pause();
+        }
+      });
+      
+      video.addEventListener('seeking', () => {
+        // 视频正在 seek 时暂停音频
+        if (state.audioElement) {
+          state.audioElement.pause();
+        }
       });
     }
     
     state.audioElement.src = audioObjUrl;
-    state.audioElement.currentTime = 0;
+    state.currentSegmentStart = startTime;
     
-    // 同步视频和音频的播放状态
-    const syncAudio = () => {
-      if (state.audioElement && !video.paused) {
-        state.audioElement.play().catch(() => {});
-      }
-    };
+    // 计算音频在片段中的偏移位置
+    const videoCurrentTime = video.currentTime;
+    const audioOffset = videoCurrentTime - startTime;
     
-    video.addEventListener('play', syncAudio);
-    video.addEventListener('pause', () => {
-      if (state.audioElement) state.audioElement.pause();
-    });
-    video.addEventListener('seeked', () => {
-      // 视频 seek 后，音频可能需要重新加载
-    });
+    if (audioOffset >= 0 && audioOffset <= segmentDuration) {
+      // 视频当前时间在片段范围内，设置音频偏移
+      state.audioElement.currentTime = audioOffset;
+    } else {
+      state.audioElement.currentTime = 0;
+    }
+    
+    // 如果视频正在播放，同步播放音频
+    if (!video.paused) {
+      state.audioElement.play().catch(() => {});
+    }
     
     if (statusEl) {
       statusEl.textContent = '🔊 音频已就绪';
@@ -1231,7 +1254,7 @@ async function loadAudioForSegment(path, startTime) {
     showToast('音频已加载', 'success');
     
   } catch (error) {
-    logger.error('音频加载失败:', error);
+    console.error('音频加载失败:', error);
     if (statusEl) {
       statusEl.textContent = '🔊 音频加载失败';
       setTimeout(() => statusEl.style.display = 'none', 3000);
@@ -1243,7 +1266,7 @@ async function loadAudioForSegment(path, startTime) {
 function onSeekToPosition(percent) {
   if (!state.videoPath || !state.needAudioTranscode) return;
   
-  const duration = state.videoDuration;
+  const duration = state.videoDuration || video.duration;
   if (!duration || duration <= 0) return;
   
   const seekTime = percent * duration;
@@ -1256,8 +1279,13 @@ function onSeekToPosition(percent) {
   // 如果拖动位置超出当前片段，重新加载音频
   if (seekTime < currentStart || seekTime > currentEnd - 5) {
     const newStart = Math.max(0, seekTime - 3);
-    state.currentSegmentStart = newStart;
     loadAudioForSegment(state.videoPath, newStart);
+  } else if (state.audioElement && state.audioElement.src) {
+    // 在当前片段范围内，同步音频位置
+    const audioOffset = seekTime - currentStart;
+    if (audioOffset >= 0) {
+      state.audioElement.currentTime = audioOffset;
+    }
   }
 }
 
