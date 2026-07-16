@@ -460,70 +460,61 @@ async def preview_stream_media(path: str, request: Request):
         logger.info(f"[预览流] 音频编码 {audio_codec} 已兼容，直接返回")
         return FileResponse(full_path, media_type="video/mp4")
     
-    # 需要转码音频，使用 FFmpeg 流式转码
+    # 需要转码音频，使用 FFmpeg 转码到临时文件
     logger.info(f"[预览流] 音频编码 {audio_codec} 不兼容，转码为 AAC")
     
-    # 先获取视频时长
-    duration = 0
-    try:
-        dur_cmd = [
-            "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", str(full_path)
-        ]
-        dur_result = subprocess.run(dur_cmd, capture_output=True, text=True, timeout=10)
-        if dur_result.returncode == 0:
-            duration = float(dur_result.stdout.strip())
-    except Exception:
-        pass
+    import tempfile
+    import hashlib
     
-    # 构建 FFmpeg 命令：复制视频流，转码音频为 AAC
+    # 生成临时文件路径（基于源文件路径的 hash）
+    hash_name = hashlib.md5(str(full_path).encode()).hexdigest()[:12]
+    temp_dir = Path("/tmp/preview_cache")
+    temp_dir.mkdir(exist_ok=True)
+    temp_file = temp_dir / f"{hash_name}.mp4"
+    
+    # 检查缓存是否存在且比源文件新
+    if temp_file.exists() and temp_file.stat().st_mtime > full_path.stat().st_mtime:
+        logger.info(f"[预览流] 使用缓存: {temp_file}")
+        # FileResponse 自动支持 Range 请求，可以随机跳转
+        return FileResponse(
+            temp_file, 
+            media_type="video/mp4",
+            headers={"Accept-Ranges": "bytes"}
+        )
+    
+    # 转码到临时文件（后台执行）
     cmd = [
         "ffmpeg", "-y", "-i", str(full_path),
         "-c:v", "copy",           # 视频流直接复制
         "-c:a", "aac",            # 音频转码为 AAC
         "-b:a", "192k",           # 音频比特率
         "-ac", "2",               # 立体声（5.1 → 2.0）
-        "-movflags", "empty_moov+frag_keyframe+separate_moof",
-        "-f", "mp4",
-        "pipe:1"                  # 输出到 stdout
+        "-movflags", "+faststart", # 确保 moov atom 在文件开头，支持随机访问
+        str(temp_file)
     ]
     
-    from fastapi.responses import StreamingResponse
+    logger.info(f"[预览流] 开始转码: {full_path.name}")
     
-    async def generate():
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        try:
-            while True:
-                chunk = await process.stdout.read(65536)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            if process.returncode is None:
-                process.terminate()
-            try:
-                await process.wait()
-            except:
-                pass
+    # 同步执行转码（会阻塞，但只在首次访问时）
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        if result.returncode != 0:
+            logger.error(f"[预览流] 转码失败: {result.stderr.decode()[-500:]}")
+            # 转码失败，返回原文件（可能没声音）
+            return FileResponse(full_path, media_type="video/mp4")
+        logger.info(f"[预览流] 转码完成: {temp_file}")
+    except subprocess.TimeoutExpired:
+        logger.error("[预览流] 转码超时（10分钟）")
+        return FileResponse(full_path, media_type="video/mp4")
+    except Exception as e:
+        logger.error(f"[预览流] 转码异常: {e}")
+        return FileResponse(full_path, media_type="video/mp4")
     
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-cache",
-    }
-    
-    # 添加自定义头部传递 duration
-    if duration > 0:
-        headers["X-Video-Duration"] = str(duration)
-    
-    return StreamingResponse(
-        generate(),
+    # 返回转码后的文件，支持 Range 请求
+    return FileResponse(
+        temp_file, 
         media_type="video/mp4",
-        headers=headers
+        headers={"Accept-Ranges": "bytes"}
     )
 
 @app.post("/api/login")
