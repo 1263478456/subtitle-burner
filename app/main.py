@@ -491,26 +491,29 @@ async def preview_stream_media(
             )
     
     # 构建 FFmpeg 命令
-    cmd = ["ffmpeg", "-y", "-noaccurate_seek"]  # 使用快速跳转模式
+    # 策略：降低分辨率和质量来加快转码速度，同时保持帧精确
+    cmd = ["ffmpeg", "-y"]
     
-    # -ss 放在 -i 前面是快速跳转模式（input seeking）
-    # 对于 MKV 文件，这可能需要重建索引，但比放在后面快
+    # -ss 放在 -i 后面是 output seeking，保证帧精确
+    # 虽然比 input seeking 慢，但对于低分辨率视频可以接受
+    cmd.extend(["-i", str(full_path)])
+    
     if start > 0:
         cmd.extend(["-ss", str(start)])
-    
-    cmd.extend(["-i", str(full_path)])
     
     # 限制输出时长
     if duration > 0:
         cmd.extend(["-t", str(duration)])
     
-    # 编码参数 - 只转码音频，视频直接复制
+    # 编码参数 - 降低质量换取速度
     cmd.extend([
-        "-c:v", "copy",           # 视频直接复制（不重新编码）
-        "-c:a", "aac",            # 音频转码为 AAC
-        "-b:a", "128k",           # 音频比特率
-        "-ac", "2",               # 立体声
-        "-avoid_negative_ts", "make_zero",
+        "-vf", "scale=640:-2",      # 降低到 640p 宽度（预览足够）
+        "-c:v", "libx264",           # 使用 H.264 编码
+        "-preset", "ultrafast",      # 最快的编码预设
+        "-crf", "28",                # 较低的质量（预览不需要高质量）
+        "-c:a", "aac",               # 音频转码为 AAC
+        "-b:a", "96k",               # 较低的音频比特率
+        "-ac", "2",                  # 立体声
         "-movflags", "+faststart",
         str(temp_file)
     ])
