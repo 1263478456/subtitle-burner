@@ -664,7 +664,9 @@ const state = {
   audioInitialized: false,   // 音频事件是否已初始化
   currentSegmentStart: 0,     // 当前片段的起始时间
   segmentDuration: 20,        // 片段时长
-  audioElement: null,         // 音频元素（用于播放转码后的音频）
+  audioElement: null,         // 当前播放的音频元素
+  nextAudioElement: null,     // 预加载的下一个音频元素
+  nextSegmentStart: 0,        // 预加载片段的起始时间
   burnQueue: [],              // 待压制队列
   params: {
     timeOffset: 0,
@@ -860,17 +862,22 @@ function setupVideoEvents() {
     document.getElementById('currentTime').textContent = formatTime(video.currentTime);
     updateSubtitleDisplay();
     
-    // 自动加载下一个音频片段（当当前片段接近结束时）
+    // 音频片段管理
     if (state.needAudioTranscode && state.audioElement && !audioLoading) {
       const currentTime = video.currentTime;
       const segmentDuration = state.segmentDuration || 20;
       const currentStart = state.currentSegmentStart || 0;
       const currentEnd = currentStart + segmentDuration;
       
-      // 当播放时间超过当前片段结束时间时，加载下一个片段
-      if (currentTime >= currentEnd) {
-        console.log(`[audio] segment ended, loading next from ${currentEnd}s`);
-        loadAudioForSegment(state.videoPath, currentEnd);
+      // 当播放时间超过当前片段结束时间时，切换到预加载的片段
+      if (currentTime >= currentEnd && state.nextAudioElement) {
+        console.log(`[audio] switching to next segment at ${currentTime}s`);
+        switchToNextSegment();
+      }
+      // 距离片段结束还有 5 秒时，预加载下一个片段
+      else if (currentTime > currentEnd - 5 && !state.nextAudioElement && !audioLoading) {
+        console.log(`[audio] preloading next segment from ${currentEnd}s`);
+        preloadNextSegment(state.videoPath, currentEnd);
       }
     }
   });
@@ -1400,6 +1407,99 @@ async function confirmSelection() {
 
 // 异步加载音频
 let audioLoading = false; // 加载锁，防止并发加载
+
+// 预加载下一个音频片段（不立即播放）
+async function preloadNextSegment(path, startTime) {
+  if (audioLoading) return;
+  audioLoading = true;
+  
+  const segmentDuration = state.segmentDuration || 20;
+  
+  try {
+    const audioUrl = `/api/media/audio-transcode?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
+    const response = await fetch(audioUrl);
+    
+    if (response.status === 204) {
+      // 音频已经是浏览器支持的格式，不需要转码
+      audioLoading = false;
+      return;
+    }
+    
+    if (!response.ok) throw new Error('音频转码失败');
+    
+    const audioBlob = await response.blob();
+    const audioObjUrl = URL.createObjectURL(audioBlob);
+    
+    // 创建新的音频元素但不播放
+    const newAudio = new Audio();
+    newAudio.src = audioObjUrl;
+    newAudio.preload = 'auto';
+    
+    // 预加载音频数据
+    await new Promise((resolve) => {
+      newAudio.addEventListener('canplaythrough', resolve, { once: true });
+      newAudio.load();
+    });
+    
+    // 保存为预加载片段
+    state.nextAudioElement = newAudio;
+    state.nextSegmentStart = startTime;
+    
+    console.log(`[audio] next segment preloaded from ${startTime}s`);
+    
+  } catch (error) {
+    console.error('预加载音频失败:', error);
+  } finally {
+    audioLoading = false;
+  }
+}
+
+// 切换到预加载的片段
+function switchToNextSegment() {
+  if (!state.nextAudioElement) return;
+  
+  const newAudio = state.nextAudioElement;
+  const startTime = state.nextSegmentStart;
+  
+  // 计算音频在片段中的偏移位置
+  const videoCurrentTime = video.currentTime;
+  const audioOffset = videoCurrentTime - startTime;
+  
+  if (audioOffset >= 0 && audioOffset <= (state.segmentDuration || 20)) {
+    newAudio.currentTime = audioOffset;
+  } else {
+    newAudio.currentTime = 0;
+  }
+  
+  // 如果视频正在播放，立即开始播放新音频
+  if (!video.paused) {
+    newAudio.play().catch(() => {});
+  }
+  
+  // 停止旧音频
+  if (state.audioElement) {
+    state.audioElement.pause();
+    state.audioElement.src = '';
+  }
+  
+  // 设置新音频为当前音频
+  state.audioElement = newAudio;
+  state.currentSegmentStart = startTime;
+  state.nextAudioElement = null;
+  state.nextSegmentStart = 0;
+  
+  // 设置新音频的 ended 事件
+  newAudio.addEventListener('ended', () => {
+    if (state.needAudioTranscode && state.videoPath) {
+      const nextStart = (state.currentSegmentStart || 0) + (state.segmentDuration || 20);
+      loadAudioForSegment(state.videoPath, nextStart);
+    }
+  });
+  
+  console.log(`[audio] switched to segment from ${startTime}s`);
+}
+
+// 加载音频片段（用于首次加载和拖动）
 async function loadAudioForSegment(path, startTime) {
   if (audioLoading) return; // 如果正在加载，跳过
   audioLoading = true;
@@ -1541,6 +1641,14 @@ function onSeekToPosition(percent) {
   const segmentDuration = state.segmentDuration || 20;
   const currentStart = state.currentSegmentStart || 0;
   const currentEnd = currentStart + segmentDuration;
+  
+  // 清除预加载的片段（因为位置变了）
+  if (state.nextAudioElement) {
+    state.nextAudioElement.pause();
+    state.nextAudioElement.src = '';
+    state.nextAudioElement = null;
+    state.nextSegmentStart = 0;
+  }
   
   // 如果拖动位置超出当前片段，重新加载音频
   if (seekTime < currentStart || seekTime > currentEnd - 5) {
