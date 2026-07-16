@@ -1101,41 +1101,30 @@ async function confirmSelection() {
   closeMediaBrowser();
   
   if (mediaBrowserMode === 'video') {
-    // 使用预览流转码 API（自动处理 EAC3 等不兼容音频）
-    const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(selectedPath);
-    
-    // 使用 fetch 获取响应头中的 duration
+    // 先获取视频 duration
     try {
-      const response = await fetch(videoUrl);
-      const durationHeader = response.headers.get('X-Video-Duration');
-      
-      if (durationHeader) {
-        state.videoDuration = parseFloat(durationHeader);
+      const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath));
+      if (probeResponse.ok) {
+        const probeData = await probeResponse.json();
+        if (probeData.format && probeData.format.duration) {
+          state.videoDuration = parseFloat(probeData.format.duration);
+        }
+        // 提示音频转码
+        if (probeData.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(probeData.audio_codec)) {
+          showToast('音频格式 ' + probeData.audio_codec + ' 将自动转码为 AAC', 'success');
+        }
       }
-      
-      // 创建 blob URL 并设置到 video 元素
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      video.src = blobUrl;
-      
     } catch (e) {
-      // 如果 fetch 失败，直接设置 src 让 video 元素处理
-      video.src = videoUrl;
+      // 忽略探测失败
     }
     
+    // 直接设置视频 URL（流式加载，不会卡死）
+    const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(selectedPath);
+    video.src = videoUrl;
     state.videoPath = selectedPath;
     document.getElementById('videoName').textContent = fileName;
     showToast('视频已加载: ' + fileName);
     
-    // 检测音频编码并提示（不阻塞）
-    fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath))
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data && data.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(data.audio_codec)) {
-          showToast('音频格式 ' + data.audio_codec + ' 已转码为 AAC', 'success');
-        }
-      })
-      .catch(() => {}); // 忽略探测失败
   } else {
     try {
       const response = await fetch('/api/media/file?path=' + encodeURIComponent(selectedPath));
