@@ -460,52 +460,51 @@ async def preview_stream_media(path: str, request: Request):
         logger.info(f"[预览流] 音频编码 {audio_codec} 已兼容，直接返回")
         return FileResponse(full_path, media_type="video/mp4")
     
-    # 需要转码音频，使用 FFmpeg 流式转码
+    # 需要转码音频，使用 FFmpeg 转码到临时文件
     logger.info(f"[预览流] 音频编码 {audio_codec} 不兼容，转码为 AAC")
     
-    # 构建 FFmpeg 命令：复制视频流，转码音频为 AAC
+    import tempfile
+    import hashlib
+    
+    # 生成临时文件路径
+    hash_name = hashlib.md5(str(full_path).encode()).hexdigest()[:12]
+    temp_dir = Path("/tmp/preview_cache")
+    temp_dir.mkdir(exist_ok=True)
+    temp_file = temp_dir / f"{hash_name}.mp4"
+    
+    # 检查缓存是否存在且比源文件新
+    if temp_file.exists() and temp_file.stat().st_mtime > full_path.stat().st_mtime:
+        logger.info(f"[预览流] 使用缓存: {temp_file}")
+        return FileResponse(temp_file, media_type="video/mp4")
+    
+    # 转码到临时文件
     cmd = [
-        "ffmpeg", "-i", str(full_path),
+        "ffmpeg", "-y", "-i", str(full_path),
         "-c:v", "copy",           # 视频流直接复制
         "-c:a", "aac",            # 音频转码为 AAC
         "-b:a", "192k",           # 音频比特率
         "-ac", "2",               # 立体声（5.1 → 2.0）
-        "-movflags", "frag_keyframe+empty_moov",  # 流式 MP4
-        "-f", "mp4",
-        "pipe:1"                  # 输出到 stdout
+        "-movflags", "+faststart", # 确保 moov atom 在文件开头
+        str(temp_file)
     ]
     
-    from fastapi.responses import StreamingResponse
-    import asyncio
+    logger.info(f"[预览流] 开始转码: {' '.join(cmd)}")
     
-    async def generate():
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        try:
-            while True:
-                chunk = await process.stdout.read(65536)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            process.terminate()
-            try:
-                await process.wait()
-            except:
-                pass
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=300)
+        if result.returncode != 0:
+            logger.error(f"[预览流] 转码失败: {result.stderr.decode()[-500:]}")
+            # 转码失败，返回原文件（可能没声音）
+            return FileResponse(full_path, media_type="video/mp4")
+        logger.info(f"[预览流] 转码完成: {temp_file}")
+    except subprocess.TimeoutExpired:
+        logger.error("[预览流] 转码超时")
+        return FileResponse(full_path, media_type="video/mp4")
+    except Exception as e:
+        logger.error(f"[预览流] 转码异常: {e}")
+        return FileResponse(full_path, media_type="video/mp4")
     
-    return StreamingResponse(
-        generate(),
-        media_type="video/mp4",
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-cache",
-        }
-    )
+    return FileResponse(temp_file, media_type="video/mp4")
 
 @app.post("/api/login")
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
