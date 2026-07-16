@@ -1149,7 +1149,7 @@ async function confirmSelection() {
 
 // 加载视频的指定位置片段
 function loadVideoAtPosition(path, startTime) {
-  const segmentDuration = 60; // 每次加载 60秒
+  const segmentDuration = 20; // 每次加载 20秒（够判断字幕对齐）
   
   let videoUrl;
   if (state.needTranscode) {
@@ -1163,6 +1163,7 @@ function loadVideoAtPosition(path, startTime) {
   video.src = videoUrl;
   state.videoPath = path;
   state.currentSegmentStart = startTime;
+  state.segmentDuration = segmentDuration;
   
   // 如果需要转码，更新时间显示
   if (state.needTranscode) {
@@ -1180,14 +1181,14 @@ function onSeekToPosition(percent) {
   const seekTime = percent * duration;
   
   // 检查是否在当前片段范围内
-  const segmentDuration = 60;
+  const segmentDuration = state.segmentDuration || 20;
   const currentStart = state.currentSegmentStart || 0;
   const currentEnd = currentStart + segmentDuration;
   
   // 如果拖动位置超出当前片段，重新加载
-  if (seekTime < currentStart || seekTime > currentEnd - 10) {
-    // 计算新的起始位置（留 10秒余量）
-    const newStart = Math.max(0, seekTime - 5);
+  if (seekTime < currentStart || seekTime > currentEnd - 5) {
+    // 计算新的起始位置（留 5秒余量）
+    const newStart = Math.max(0, seekTime - 3);
     loadVideoAtPosition(state.videoPath, newStart);
   }
 }

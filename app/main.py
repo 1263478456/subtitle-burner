@@ -420,7 +420,7 @@ async def preview_stream_media(
     path: str, 
     request: Request,
     start: float = 0,        # 起始时间（秒）
-    duration: float = 60      # 转码时长（秒），默认 60秒
+    duration: float = 20      # 转码时长（秒），默认 20秒（够判断字幕对齐）
 ):
     """为预览提供转码后的流媒体（确保浏览器兼容性）
     
