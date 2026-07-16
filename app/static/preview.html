@@ -688,17 +688,14 @@ function setupVideoEvents() {
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const duration = getDuration();
     if (duration && duration > 0) {
-      // 计算目标时间在完整视频中的位置
+      // 计算目标时间
       const targetTime = percent * duration;
-      // 计算在当前片段中的位置
-      const segmentStart = state.currentSegmentStart || 0;
-      const timeInSegment = targetTime - segmentStart;
       
-      // 如果目标时间在当前片段内，直接跳转
-      if (timeInSegment >= 0 && timeInSegment <= (state.segmentDuration || 20)) {
-        video.currentTime = timeInSegment;
-      } else {
-        // 需要加载新片段
+      // 直接跳转到目标时间（视频是完整加载的，不需要分段）
+      video.currentTime = targetTime;
+      
+      // 如果需要转码音频，检查是否需要加载新片段
+      if (state.needAudioTranscode) {
         onSeekToPosition(percent);
       }
     }
