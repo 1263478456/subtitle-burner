@@ -289,8 +289,9 @@ input[type="range"]::-webkit-slider-thumb {
     <button class="btn btn-ghost btn-sm" onclick="loadLocalSubtitle()">💬 本地字幕</button>
     <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('video')">📁 媒体库视频</button>
     <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('subtitle')">📁 媒体库字幕</button>
+    <button class="btn btn-ghost btn-sm" onclick="openQueueModal()">📋 待压制队列</button>
     <button class="btn btn-ghost btn-sm" onclick="openInNewTab()" title="在新标签页打开">↗ 新窗口</button>
-    <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 应用到压制</button>
+    <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 添加到队列</button>
   </div>
 </header>
 
@@ -475,6 +476,26 @@ input[type="range"]::-webkit-slider-thumb {
   </div>
 </div>
 
+<!-- 待压制队列弹窗 -->
+<div class="modal-overlay" id="queueModal">
+  <div class="modal" style="width:700px; max-height:80vh;">
+    <div class="modal-header">
+      <h3>📋 待压制队列</h3>
+      <button class="modal-close" onclick="closeQueueModal()">✕</button>
+    </div>
+    <div class="modal-list" id="queueList" style="min-height:200px;">
+      <div style="text-align:center; color:#666; padding:40px;">队列为空</div>
+    </div>
+    <div class="modal-footer">
+      <span class="selection-info" id="queueInfo">共 0 个任务</span>
+      <div class="actions">
+        <button class="btn btn-ghost btn-sm" onclick="clearQueue()">清空队列</button>
+        <button class="btn btn-primary btn-sm" id="startBurnBtn" onclick="startBatchBurn()" disabled>🔥 开始压制</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="videoInput" accept="video/*" style="display:none">
 <input type="file" id="subInput" accept=".srt,.vtt,.ass,.ssa,.sub" style="display:none">
 
@@ -492,6 +513,7 @@ const state = {
   currentSegmentStart: 0,     // 当前片段的起始时间
   segmentDuration: 20,        // 片段时长
   audioElement: null,         // 音频元素（用于播放转码后的音频）
+  burnQueue: [],              // 待压制队列
   params: {
     timeOffset: 0,
     positionY: 'bottom',
@@ -531,6 +553,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('headerTitle').style.display = 'none';
   }
   loadSavedParams();
+  
+  // 从 localStorage 恢复队列
+  try {
+    const savedQueue = localStorage.getItem('burnQueue');
+    if (savedQueue) {
+      state.burnQueue = JSON.parse(savedQueue);
+    }
+  } catch (e) {
+    console.error('Failed to load burn queue:', e);
+  }
+  
   setupVideoEvents();
   setupKeyboardShortcuts();
 });
@@ -1289,10 +1322,174 @@ function onSeekToPosition(percent) {
   }
 }
 
-// 应用到压制
+// 应用到压制（添加到队列）
 function applyToBurn() {
-  localStorage.setItem('subtitlePreviewParams', JSON.stringify(state.params));
-  showToast('参数已保存！返回主页压制时自动应用');
+  if (!state.videoPath) {
+    showToast('请先加载视频', 'error');
+    return;
+  }
+  
+  if (!state.subtitlePath) {
+    showToast('请先加载字幕', 'error');
+    return;
+  }
+  
+  // 获取当前参数
+  const params = {
+    videoPath: state.videoPath,
+    videoName: state.videoPath.split('/').pop(),
+    subtitlePath: state.subtitlePath,
+    subtitleName: state.subtitlePath.split('/').pop(),
+    params: { ...state.params },
+    addedAt: new Date().toISOString()
+  };
+  
+  // 检查是否已在队列中
+  const existingIndex = state.burnQueue.findIndex(
+    item => item.videoPath === params.videoPath && item.subtitlePath === params.subtitlePath
+  );
+  
+  if (existingIndex >= 0) {
+    // 更新现有任务
+    state.burnQueue[existingIndex] = params;
+    showToast('已更新队列中的任务', 'success');
+  } else {
+    // 添加新任务
+    state.burnQueue.push(params);
+    showToast('已添加到待压制队列', 'success');
+  }
+  
+  // 保存到 localStorage
+  localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
+  
+  // 更新队列 UI
+  updateQueueUI();
+}
+
+// 打开队列弹窗
+function openQueueModal() {
+  updateQueueUI();
+  document.getElementById('queueModal').classList.add('active');
+}
+
+// 关闭队列弹窗
+function closeQueueModal() {
+  document.getElementById('queueModal').classList.remove('active');
+}
+
+// 更新队列 UI
+function updateQueueUI() {
+  const list = document.getElementById('queueList');
+  const info = document.getElementById('queueInfo');
+  const startBtn = document.getElementById('startBurnBtn');
+  
+  info.textContent = `共 ${state.burnQueue.length} 个任务`;
+  startBtn.disabled = state.burnQueue.length === 0;
+  
+  if (state.burnQueue.length === 0) {
+    list.innerHTML = '<div style="text-align:center; color:#666; padding:40px;">队列为空</div>';
+    return;
+  }
+  
+  list.innerHTML = state.burnQueue.map((item, index) => `
+    <div class="queue-item" style="padding:12px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13px; color:#e5e5e5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          📹 ${item.videoName}
+        </div>
+        <div style="font-size:11px; color:#999; margin-top:4px;">
+          💬 ${item.subtitleName}
+        </div>
+        <div style="font-size:11px; color:#666; margin-top:2px;">
+          偏移: ${item.params.timeOffset}s | 字号: ${item.params.fontSize}px | 位置: ${item.params.positionY}
+        </div>
+      </div>
+      <button onclick="removeFromQueue(${index})" style="background:transparent; border:1px solid #666; color:#ef4444; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px; margin-left:12px;">
+        删除
+      </button>
+    </div>
+  `).join('');
+}
+
+// 从队列中删除
+function removeFromQueue(index) {
+  state.burnQueue.splice(index, 1);
+  localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
+  updateQueueUI();
+  showToast('已从队列中删除', 'success');
+}
+
+// 清空队列
+function clearQueue() {
+  if (state.burnQueue.length === 0) return;
+  
+  if (confirm('确定要清空队列吗？')) {
+    state.burnQueue = [];
+    localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
+    updateQueueUI();
+    showToast('队列已清空', 'success');
+  }
+}
+
+// 开始批量压制
+async function startBatchBurn() {
+  if (state.burnQueue.length === 0) {
+    showToast('队列为空', 'error');
+    return;
+  }
+  
+  const startBtn = document.getElementById('startBurnBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '提交中...';
+  
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (const item of state.burnQueue) {
+    try {
+      const fd = new FormData();
+      fd.append('video_path', item.videoPath);
+      fd.append('subtitle_path', item.subtitlePath);
+      fd.append('crf', '18');
+      fd.append('preset', 'medium');
+      fd.append('codec', 'libx264');
+      fd.append('style', '');
+      fd.append('sub_mode', 'burn');
+      fd.append('keep_original_sub', 'false');
+      fd.append('preview_params', JSON.stringify(item.params));
+      
+      const response = await fetch('/api/media/burn', {
+        method: 'POST',
+        body: fd
+      });
+      
+      if (response.ok) {
+        successCount++;
+      } else {
+        failCount++;
+        console.error('提交失败:', item.videoName);
+      }
+    } catch (error) {
+      failCount++;
+      console.error('提交失败:', error);
+    }
+  }
+  
+  // 清空队列
+  state.burnQueue = [];
+  localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
+  updateQueueUI();
+  
+  startBtn.textContent = '🔥 开始压制';
+  startBtn.disabled = false;
+  
+  if (failCount === 0) {
+    showToast(`已成功提交 ${successCount} 个任务`, 'success');
+  } else {
+    showToast(`提交完成：${successCount} 成功，${failCount} 失败`, 'error');
+  }
+  
+  closeQueueModal();
 }
 
 // 在新标签页打开
