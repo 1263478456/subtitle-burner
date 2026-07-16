@@ -416,11 +416,19 @@ async def probe_media_file(path: str, request: Request):
         return {"audio_codec": "unknown", "audio_channels": 0, "error": str(e)}
 
 @app.get("/api/media/preview-stream")
-async def preview_stream_media(path: str, request: Request):
+async def preview_stream_media(
+    path: str, 
+    request: Request,
+    start: float = 0,        # 起始时间（秒）
+    duration: float = 60      # 转码时长（秒），默认 60秒
+):
     """为预览提供转码后的流媒体（确保浏览器兼容性）
     
-    这个端点会将视频的音频转码为 AAC 格式（如果原始音频不是浏览器支持的格式），
-    视频保持原样或转码为 H.264。
+    支持按需片段转码：
+    - start: 从哪个时间点开始转码（秒）
+    - duration: 转码多长时间（秒），默认 60秒
+    
+    这样可以快速预览视频的任意片段，不需要转码完整视频。
     """
     user = get_current_user(request)
     if not user:
@@ -453,64 +461,82 @@ async def preview_stream_media(path: str, request: Request):
     except Exception:
         audio_codec = "unknown"
     
-    logger.info(f"[预览流] 文件: {full_path.name}, 音频编码: {audio_codec}")
+    logger.info(f"[预览流] 文件: {full_path.name}, 音频编码: {audio_codec}, start: {start}s, duration: {duration}s")
     
-    # 如果音频已经是浏览器支持的格式，直接返回原文件
-    if audio_codec in BROWSER_AUDIO_CODECS:
+    # 如果音频已经是浏览器支持的格式，且不需要转码片段
+    if audio_codec in BROWSER_AUDIO_CODECS and start == 0:
         logger.info(f"[预览流] 音频编码 {audio_codec} 已兼容，直接返回")
         return FileResponse(full_path, media_type="video/mp4")
     
-    # 需要转码音频，使用 FFmpeg 转码到临时文件
-    logger.info(f"[预览流] 音频编码 {audio_codec} 不兼容，转码为 AAC")
-    
+    # 需要转码（音频不兼容或需要片段转码）
     import tempfile
     import hashlib
     
-    # 生成临时文件路径（基于源文件路径的 hash）
-    hash_name = hashlib.md5(str(full_path).encode()).hexdigest()[:12]
+    # 生成临时文件名（包含时间参数）
+    hash_name = hashlib.md5(f"{full_path}_{start}_{duration}".encode()).hexdigest()[:16]
     temp_dir = Path("/tmp/preview_cache")
     temp_dir.mkdir(exist_ok=True)
     temp_file = temp_dir / f"{hash_name}.mp4"
     
-    # 检查缓存是否存在且比源文件新
-    if temp_file.exists() and temp_file.stat().st_mtime > full_path.stat().st_mtime:
-        logger.info(f"[预览流] 使用缓存: {temp_file}")
-        # FileResponse 自动支持 Range 请求，可以随机跳转
-        return FileResponse(
-            temp_file, 
-            media_type="video/mp4",
-            headers={"Accept-Ranges": "bytes"}
-        )
+    # 检查缓存是否存在（5分钟内的缓存有效）
+    if temp_file.exists():
+        cache_age = time.time() - temp_file.stat().st_mtime
+        if cache_age < 300:  # 5分钟缓存
+            logger.info(f"[预览流] 使用缓存: {temp_file}")
+            return FileResponse(
+                temp_file, 
+                media_type="video/mp4",
+                headers={"Accept-Ranges": "bytes"}
+            )
     
-    # 转码到临时文件（后台执行）
-    cmd = [
-        "ffmpeg", "-y", "-i", str(full_path),
-        "-c:v", "copy",           # 视频流直接复制
-        "-c:a", "aac",            # 音频转码为 AAC
-        "-b:a", "192k",           # 音频比特率
-        "-ac", "2",               # 立体声（5.1 → 2.0）
-        "-movflags", "+faststart", # 确保 moov atom 在文件开头，支持随机访问
+    # 构建 FFmpeg 命令
+    cmd = ["ffmpeg", "-y"]
+    
+    # 如果有起始时间，使用 -ss 跳转（放在 -i 前面是快速跳转）
+    if start > 0:
+        cmd.extend(["-ss", str(start)])
+    
+    cmd.extend(["-i", str(full_path)])
+    
+    # 如果有起始时间，限制输出时长
+    if start > 0 and duration > 0:
+        cmd.extend(["-t", str(duration)])
+    
+    # 编码参数
+    if audio_codec in BROWSER_AUDIO_CODECS:
+        # 音频兼容，只处理视频片段
+        cmd.extend(["-c:v", "copy", "-c:a", "copy"])
+    else:
+        # 需要转码音频
+        cmd.extend([
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k", "-ac", "2"
+        ])
+    
+    cmd.extend([
+        "-movflags", "+faststart",
         str(temp_file)
-    ]
+    ])
     
-    logger.info(f"[预览流] 开始转码: {full_path.name}")
+    logger.info(f"[预览流] 开始转码: {full_path.name} [{start}s - {start + duration}s]")
     
-    # 同步执行转码（会阻塞，但只在首次访问时）
+    # 执行转码
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, timeout=120)
         if result.returncode != 0:
             logger.error(f"[预览流] 转码失败: {result.stderr.decode()[-500:]}")
-            # 转码失败，返回原文件（可能没声音）
-            return FileResponse(full_path, media_type="video/mp4")
+            # 如果片段转码失败，尝试返回原文件
+            if start == 0:
+                return FileResponse(full_path, media_type="video/mp4")
+            raise HTTPException(500, "转码失败")
         logger.info(f"[预览流] 转码完成: {temp_file}")
     except subprocess.TimeoutExpired:
-        logger.error("[预览流] 转码超时（10分钟）")
-        return FileResponse(full_path, media_type="video/mp4")
+        logger.error("[预览流] 转码超时")
+        raise HTTPException(500, "转码超时")
     except Exception as e:
         logger.error(f"[预览流] 转码异常: {e}")
-        return FileResponse(full_path, media_type="video/mp4")
+        raise HTTPException(500, f"转码异常: {str(e)}")
     
-    # 返回转码后的文件，支持 Range 请求
     return FileResponse(
         temp_file, 
         media_type="video/mp4",

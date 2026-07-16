@@ -486,7 +486,9 @@ const state = {
   subtitleType: null,
   parsedSubtitles: [],
   currentSubtitleIndex: -1,
-  videoDuration: 0, // 从响应头获取的 duration
+  videoDuration: 0,        // 从响应头获取的 duration
+  needTranscode: false,    // 是否需要转码
+  currentSegmentStart: 0,  // 当前片段的起始时间
   params: {
     timeOffset: 0,
     positionY: 'bottom',
@@ -679,6 +681,8 @@ function setupVideoEvents() {
     const duration = getDuration();
     if (duration && duration > 0) {
       video.currentTime = percent * duration;
+      // 如果需要转码，检查是否需要加载新片段
+      onSeekToPosition(percent);
     }
   }
   
@@ -1101,7 +1105,7 @@ async function confirmSelection() {
   closeMediaBrowser();
   
   if (mediaBrowserMode === 'video') {
-    // 先获取视频 duration
+    // 先获取视频信息
     try {
       const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath));
       if (probeResponse.ok) {
@@ -1111,19 +1115,19 @@ async function confirmSelection() {
         }
         // 提示音频转码
         if (probeData.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(probeData.audio_codec)) {
-          showToast('音频格式 ' + probeData.audio_codec + ' 将自动转码为 AAC', 'success');
+          state.needTranscode = true;
+          showToast('音频格式 ' + probeData.audio_codec + ' 需要转码，将加载片段预览', 'success');
+        } else {
+          state.needTranscode = false;
         }
       }
     } catch (e) {
       // 忽略探测失败
     }
     
-    // 直接设置视频 URL（流式加载，不会卡死）
-    const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(selectedPath);
-    video.src = videoUrl;
-    state.videoPath = selectedPath;
+    // 加载视频
+    loadVideoAtPosition(selectedPath, 0);
     document.getElementById('videoName').textContent = fileName;
-    showToast('视频已加载: ' + fileName);
     
   } else {
     try {
@@ -1140,6 +1144,51 @@ async function confirmSelection() {
     } catch (error) {
       showToast('加载字幕失败: ' + error.message, 'error');
     }
+  }
+}
+
+// 加载视频的指定位置片段
+function loadVideoAtPosition(path, startTime) {
+  const segmentDuration = 60; // 每次加载 60秒
+  
+  let videoUrl;
+  if (state.needTranscode) {
+    // 需要转码的视频，使用片段转码
+    videoUrl = `/api/media/preview-stream?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
+  } else {
+    // 不需要转码，直接加载原文件
+    videoUrl = `/api/media/preview-stream?path=${encodeURIComponent(path)}`;
+  }
+  
+  video.src = videoUrl;
+  state.videoPath = path;
+  state.currentSegmentStart = startTime;
+  
+  // 如果需要转码，更新时间显示
+  if (state.needTranscode) {
+    showToast(`加载片段: ${formatTime(startTime)} - ${formatTime(startTime + segmentDuration)}`, 'success');
+  }
+}
+
+// 拖动进度条时触发片段加载
+function onSeekToPosition(percent) {
+  if (!state.videoPath || !state.needTranscode) return;
+  
+  const duration = state.videoDuration;
+  if (!duration || duration <= 0) return;
+  
+  const seekTime = percent * duration;
+  
+  // 检查是否在当前片段范围内
+  const segmentDuration = 60;
+  const currentStart = state.currentSegmentStart || 0;
+  const currentEnd = currentStart + segmentDuration;
+  
+  // 如果拖动位置超出当前片段，重新加载
+  if (seekTime < currentStart || seekTime > currentEnd - 10) {
+    // 计算新的起始位置（留 10秒余量）
+    const newStart = Math.max(0, seekTime - 5);
+    loadVideoAtPosition(state.videoPath, newStart);
   }
 }
 
