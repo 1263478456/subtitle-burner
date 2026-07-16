@@ -88,6 +88,17 @@ def init_db():
     conn.execute("""CREATE TABLE IF NOT EXISTS users (
         username TEXT PRIMARY KEY, password TEXT, created_at TEXT
     )""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS presets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        params TEXT NOT NULL,
+        is_default BOOLEAN DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(user, name)
+    )""")
     import hashlib
     pwd_hash = hashlib.sha256(ADMIN_PASS.encode()).hexdigest()
     conn.execute("INSERT OR IGNORE INTO users (username, password, created_at) VALUES (?, ?, ?)",
@@ -299,7 +310,7 @@ async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.0.75",
+        "version": "3.0.76",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
@@ -1254,6 +1265,176 @@ def hex_to_ass_color(hex_color, alpha="00"):
 
 PREVIEW_DIR = OUTPUT_DIR / "previews"
 PREVIEW_DIR.mkdir(exist_ok=True)
+
+# ============================================================
+# 字幕预设 API / Subtitle Presets API
+# ============================================================
+
+@app.get("/api/presets")
+async def list_presets(user: str = Depends(require_auth)):
+    """获取当前用户的所有字幕预设"""
+    rows = db_query(
+        "SELECT * FROM presets WHERE user=? ORDER BY is_default DESC, updated_at DESC",
+        (user,)
+    )
+    presets = []
+    for r in rows:
+        preset = dict(r)
+        if preset.get('params'):
+            try:
+                preset['params'] = json.loads(preset['params'])
+            except:
+                pass
+        presets.append(preset)
+    return {"presets": presets, "total": len(presets)}
+
+@app.get("/api/presets/{preset_id}")
+async def get_preset(preset_id: int, user: str = Depends(require_auth)):
+    """获取单个预设详情"""
+    rows = db_query("SELECT * FROM presets WHERE id=? AND user=?", (preset_id, user))
+    if not rows:
+        raise HTTPException(404, "预设不存在")
+    
+    preset = dict(rows[0])
+    if preset.get('params'):
+        try:
+            preset['params'] = json.loads(preset['params'])
+        except:
+            pass
+    return preset
+
+@app.post("/api/presets")
+async def create_preset(
+    user: str = Depends(require_auth),
+    name: str = Form(...),
+    description: str = Form(""),
+    params: str = Form(...),
+    is_default: bool = Form(False)
+):
+    """创建新的字幕预设"""
+    # 检查名称是否已存在
+    existing = db_query("SELECT id FROM presets WHERE user=? AND name=?", (user, name))
+    if existing:
+        raise HTTPException(400, "预设名称已存在")
+    
+    # 验证 params 是有效的 JSON
+    try:
+        json.loads(params)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "参数格式无效")
+    
+    now = datetime.now().isoformat()
+    
+    # 如果设为默认，先取消其他默认
+    if is_default:
+        db_execute("UPDATE presets SET is_default=0 WHERE user=?", (user,))
+    
+    # 插入新预设
+    db_execute(
+        """INSERT INTO presets (user, name, description, params, is_default, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (user, name, description, params, 1 if is_default else 0, now, now)
+    )
+    
+    # 获取新创建的预设 ID
+    new_preset = db_query("SELECT id FROM presets WHERE user=? AND name=?", (user, name))
+    preset_id = new_preset[0]["id"] if new_preset else None
+    
+    logger.info(f"[预设] 用户 {user} 创建预设: {name} (ID: {preset_id})")
+    return {"id": preset_id, "message": "预设创建成功"}
+
+@app.put("/api/presets/{preset_id}")
+async def update_preset(
+    preset_id: int,
+    user: str = Depends(require_auth),
+    name: str = Form(None),
+    description: str = Form(None),
+    params: str = Form(None),
+    is_default: bool = Form(None)
+):
+    """更新字幕预设"""
+    # 检查预设是否存在
+    existing = db_query("SELECT * FROM presets WHERE id=? AND user=?", (preset_id, user))
+    if not existing:
+        raise HTTPException(404, "预设不存在")
+    
+    current = dict(existing[0])
+    now = datetime.now().isoformat()
+    
+    # 更新字段
+    new_name = name if name is not None else current["name"]
+    new_desc = description if description is not None else current.get("description", "")
+    new_params = params if params is not None else current["params"]
+    new_default = is_default if is_default is not None else bool(current["is_default"])
+    
+    # 检查名称冲突（如果修改了名称）
+    if name and name != current["name"]:
+        name_exists = db_query("SELECT id FROM presets WHERE user=? AND name=? AND id!=?", (user, name, preset_id))
+        if name_exists:
+            raise HTTPException(400, "预设名称已存在")
+    
+    # 验证 params
+    if params:
+        try:
+            json.loads(params)
+        except json.JSONDecodeError:
+            raise HTTPException(400, "参数格式无效")
+    
+    # 如果设为默认，先取消其他默认
+    if new_default and not current["is_default"]:
+        db_execute("UPDATE presets SET is_default=0 WHERE user=?", (user,))
+    
+    # 更新预设
+    db_execute(
+        """UPDATE presets SET name=?, description=?, params=?, is_default=?, updated_at=?
+           WHERE id=? AND user=?""",
+        (new_name, new_desc, new_params, 1 if new_default else 0, now, preset_id, user)
+    )
+    
+    logger.info(f"[预设] 用户 {user} 更新预设: {new_name} (ID: {preset_id})")
+    return {"message": "预设更新成功", "updated_at": now}
+
+@app.delete("/api/presets/{preset_id}")
+async def delete_preset(preset_id: int, user: str = Depends(require_auth)):
+    """删除字幕预设"""
+    existing = db_query("SELECT name FROM presets WHERE id=? AND user=?", (preset_id, user))
+    if not existing:
+        raise HTTPException(404, "预设不存在")
+    
+    db_execute("DELETE FROM presets WHERE id=? AND user=?", (preset_id, user))
+    
+    logger.info(f"[预设] 用户 {user} 删除预设: {existing[0]['name']} (ID: {preset_id})")
+    return {"message": "预设已删除"}
+
+@app.post("/api/presets/{preset_id}/set-default")
+async def set_default_preset(preset_id: int, user: str = Depends(require_auth)):
+    """设置默认预设"""
+    existing = db_query("SELECT name FROM presets WHERE id=? AND user=?", (preset_id, user))
+    if not existing:
+        raise HTTPException(404, "预设不存在")
+    
+    # 取消所有默认
+    db_execute("UPDATE presets SET is_default=0 WHERE user=?", (user,))
+    # 设置新的默认
+    db_execute("UPDATE presets SET is_default=1 WHERE id=? AND user=?", (preset_id, user))
+    
+    logger.info(f"[预设] 用户 {user} 设置默认预设: {existing[0]['name']} (ID: {preset_id})")
+    return {"message": "已设为默认预设"}
+
+@app.get("/api/presets/default")
+async def get_default_preset(user: str = Depends(require_auth)):
+    """获取当前用户的默认预设"""
+    rows = db_query("SELECT * FROM presets WHERE user=? AND is_default=1", (user,))
+    if not rows:
+        return {"preset": None}
+    
+    preset = dict(rows[0])
+    if preset.get('params'):
+        try:
+            preset['params'] = json.loads(preset['params'])
+        except:
+            pass
+    return {"preset": preset}
 
 @app.post("/api/preview")
 async def generate_preview(
