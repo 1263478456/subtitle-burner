@@ -87,12 +87,13 @@ body.embedded .main-container { min-height: 500px; }
   padding: 10px 14px; flex-shrink: 0;
 }
 .progress-bar { 
-  width: 100%; height: 5px; background: #333; border-radius: 3px;
+  width: 100%; height: 12px; background: #333; border-radius: 3px;
   cursor: pointer; margin-bottom: 8px; position: relative;
 }
 .progress-fill { 
   height: 100%; background: linear-gradient(90deg, var(--primary), var(--purple));
   border-radius: 3px; width: 0%; transition: width 0.1s;
+  pointer-events: none;
 }
 .controls-row { 
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -519,7 +520,8 @@ function isEmbedded() {
 document.addEventListener('DOMContentLoaded', () => {
   if (isEmbedded()) {
     document.body.classList.add('embedded');
-    document.getElementById('backBtn').style.display = 'none';
+    // 嵌入模式下隐藏整个 header（主页已有标题）
+    document.querySelector('header').style.display = 'none';
   }
   loadSavedParams();
   setupVideoEvents();
@@ -647,11 +649,33 @@ function setupVideoEvents() {
   });
 }
 
-// 进度条点击
+// 进度条点击和拖动
 document.getElementById('progressBar').addEventListener('click', (e) => {
-  const rect = e.target.getBoundingClientRect();
-  const percent = (e.clientX - rect.left) / rect.width;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   video.currentTime = percent * video.duration;
+});
+
+// 进度条拖动支持
+let isDragging = false;
+
+document.getElementById('progressBar').addEventListener('mousedown', (e) => {
+  isDragging = true;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  video.currentTime = percent * video.duration;
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const progressBar = document.getElementById('progressBar');
+  const rect = progressBar.getBoundingClientRect();
+  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+  video.currentTime = percent * video.duration;
+});
+
+document.addEventListener('mouseup', () => {
+  isDragging = false;
 });
 
 // 视频控制
