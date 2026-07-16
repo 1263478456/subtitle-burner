@@ -297,6 +297,7 @@ input[type="range"]::-webkit-slider-thumb {
 <div class="file-info" id="fileInfo">
   <span>📹 视频: <span class="name" id="videoName">未加载</span></span>
   <span>💬 字幕: <span class="name" id="subName">未加载</span></span>
+  <span id="audioStatus" style="display:none; color:#10b981;">🔊 音频加载中...</span>
 </div>
 
 <div class="main-container">
@@ -486,9 +487,11 @@ const state = {
   subtitleType: null,
   parsedSubtitles: [],
   currentSubtitleIndex: -1,
-  videoDuration: 0,        // 从响应头获取的 duration
-  needTranscode: false,    // 是否需要转码
-  currentSegmentStart: 0,  // 当前片段的起始时间
+  videoDuration: 0,           // 从 probe 获取的完整视频时长
+  needAudioTranscode: false,  // 是否需要转码音频
+  currentSegmentStart: 0,     // 当前片段的起始时间
+  segmentDuration: 20,        // 片段时长
+  audioElement: null,         // 音频元素（用于播放转码后的音频）
   params: {
     timeOffset: 0,
     positionY: 'bottom',
@@ -1120,7 +1123,7 @@ async function confirmSelection() {
   closeMediaBrowser();
   
   if (mediaBrowserMode === 'video') {
-    // 先获取视频信息
+    // 获取视频信息
     try {
       const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath));
       if (probeResponse.ok) {
@@ -1128,21 +1131,31 @@ async function confirmSelection() {
         if (probeData.format && probeData.format.duration) {
           state.videoDuration = parseFloat(probeData.format.duration);
         }
-        // 提示音频转码
+        // 检查音频是否需要转码
         if (probeData.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(probeData.audio_codec)) {
-          state.needTranscode = true;
-          showToast('音频格式 ' + probeData.audio_codec + ' 需要转码，将加载片段预览', 'success');
+          state.needAudioTranscode = true;
         } else {
-          state.needTranscode = false;
+          state.needAudioTranscode = false;
         }
       }
     } catch (e) {
       // 忽略探测失败
     }
     
-    // 加载视频
-    loadVideoAtPosition(selectedPath, 0);
+    // 立即播放视频（原文件，可能静音）
+    state.videoPath = selectedPath;
+    state.currentSegmentStart = 0;
+    
+    // 使用原文件直接播放（浏览器会尝试播放，可能只有画面）
+    const videoUrl = '/api/media/stream?path=' + encodeURIComponent(selectedPath);
+    video.src = videoUrl;
     document.getElementById('videoName').textContent = fileName;
+    showToast('视频已加载: ' + fileName);
+    
+    // 如果需要转码音频，后台异步加载
+    if (state.needAudioTranscode) {
+      loadAudioForSegment(selectedPath, 0);
+    }
     
   } else {
     try {
@@ -1162,33 +1175,77 @@ async function confirmSelection() {
   }
 }
 
-// 加载视频的指定位置片段
-function loadVideoAtPosition(path, startTime) {
-  const segmentDuration = 20; // 每次加载 20秒（够判断字幕对齐）
+// 异步加载音频
+async function loadAudioForSegment(path, startTime) {
+  const segmentDuration = 20;
+  const statusEl = document.getElementById('audioStatus');
   
-  let videoUrl;
-  if (state.needTranscode) {
-    // 需要转码的视频，使用片段转码
-    videoUrl = `/api/media/preview-stream?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
-  } else {
-    // 不需要转码，直接加载原文件
-    videoUrl = `/api/media/preview-stream?path=${encodeURIComponent(path)}`;
+  if (statusEl) {
+    statusEl.textContent = '🔊 音频加载中...';
+    statusEl.style.display = 'block';
   }
   
-  video.src = videoUrl;
-  state.videoPath = path;
-  state.currentSegmentStart = startTime;
-  state.segmentDuration = segmentDuration;
-  
-  // 如果需要转码，更新时间显示
-  if (state.needTranscode) {
-    showToast(`加载片段: ${formatTime(startTime)} - ${formatTime(startTime + segmentDuration)}`, 'success');
+  try {
+    const audioUrl = `/api/media/audio-transcode?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
+    const response = await fetch(audioUrl);
+    
+    if (response.status === 204) {
+      // 音频已经是浏览器支持的格式，不需要转码
+      if (statusEl) statusEl.style.display = 'none';
+      return;
+    }
+    
+    if (!response.ok) throw new Error('音频转码失败');
+    
+    // 获取音频 blob
+    const audioBlob = await response.blob();
+    const audioObjUrl = URL.createObjectURL(audioBlob);
+    
+    // 创建音频元素播放
+    if (!state.audioElement) {
+      state.audioElement = new Audio();
+      state.audioElement.addEventListener('ended', () => {
+        // 音频播放结束，可以加载下一段
+      });
+    }
+    
+    state.audioElement.src = audioObjUrl;
+    state.audioElement.currentTime = 0;
+    
+    // 同步视频和音频的播放状态
+    const syncAudio = () => {
+      if (state.audioElement && !video.paused) {
+        state.audioElement.play().catch(() => {});
+      }
+    };
+    
+    video.addEventListener('play', syncAudio);
+    video.addEventListener('pause', () => {
+      if (state.audioElement) state.audioElement.pause();
+    });
+    video.addEventListener('seeked', () => {
+      // 视频 seek 后，音频可能需要重新加载
+    });
+    
+    if (statusEl) {
+      statusEl.textContent = '🔊 音频已就绪';
+      setTimeout(() => statusEl.style.display = 'none', 2000);
+    }
+    
+    showToast('音频已加载', 'success');
+    
+  } catch (error) {
+    logger.error('音频加载失败:', error);
+    if (statusEl) {
+      statusEl.textContent = '🔊 音频加载失败';
+      setTimeout(() => statusEl.style.display = 'none', 3000);
+    }
   }
 }
 
-// 拖动进度条时触发片段加载
+// 拖动时重新加载音频
 function onSeekToPosition(percent) {
-  if (!state.videoPath || !state.needTranscode) return;
+  if (!state.videoPath || !state.needAudioTranscode) return;
   
   const duration = state.videoDuration;
   if (!duration || duration <= 0) return;
@@ -1200,11 +1257,11 @@ function onSeekToPosition(percent) {
   const currentStart = state.currentSegmentStart || 0;
   const currentEnd = currentStart + segmentDuration;
   
-  // 如果拖动位置超出当前片段，重新加载
+  // 如果拖动位置超出当前片段，重新加载音频
   if (seekTime < currentStart || seekTime > currentEnd - 5) {
-    // 计算新的起始位置（留 5秒余量）
     const newStart = Math.max(0, seekTime - 3);
-    loadVideoAtPosition(state.videoPath, newStart);
+    state.currentSegmentStart = newStart;
+    loadAudioForSegment(state.videoPath, newStart);
   }
 }
 

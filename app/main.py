@@ -349,7 +349,7 @@ async def get_media_file(path: str, request: Request):
 
 @app.get("/api/media/stream")
 async def stream_media_file(path: str, request: Request):
-    """流式传输媒体文件（用于视频预览）"""
+    """流式传输媒体文件（用于视频预览，直接返回原文件）"""
     user = get_current_user(request)
     if not user:
         raise HTTPException(401, "请先登录")
@@ -367,7 +367,107 @@ async def stream_media_file(path: str, request: Request):
     if full_path.suffix.lower() not in video_exts:
         raise HTTPException(400, "不是视频文件")
     
+    # 直接返回原文件，让浏览器尝试播放
+    # 浏览器支持的格式会正常播放，不支持的可能只有画面没有声音
     return FileResponse(full_path, media_type="video/mp4")
+
+@app.get("/api/media/audio-transcode")
+async def audio_transcode_media(
+    path: str, 
+    request: Request,
+    start: float = 0,
+    duration: float = 20
+):
+    """单独转码音频为 AAC 格式（用于预览时补充声音）"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    if ".." in path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    video_exts = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v']
+    if full_path.suffix.lower() not in video_exts:
+        raise HTTPException(400, "不是视频文件")
+    
+    # 探测音频编码
+    BROWSER_AUDIO_CODECS = {'aac', 'mp3', 'opus', 'vorbis', 'wav', 'pcm_s16le'}
+    try:
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-select_streams", "a:0",
+            "-show_entries", "stream=codec_name",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(full_path)
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+        audio_codec = probe_result.stdout.strip().lower() if probe_result.returncode == 0 else "unknown"
+    except Exception:
+        audio_codec = "unknown"
+    
+    # 如果音频已经是浏览器支持的格式，返回空（不需要转码）
+    if audio_codec in BROWSER_AUDIO_CODECS:
+        return Response(status_code=204)  # No Content
+    
+    logger.info(f"[音频转码] 文件: {full_path.name}, 音频编码: {audio_codec}, start: {start}s, duration: {duration}s")
+    
+    # 生成临时文件
+    import tempfile
+    import hashlib
+    import time as _time
+    
+    hash_name = hashlib.md5(f"{full_path}_audio_{start}_{duration}".encode()).hexdigest()[:16]
+    temp_dir = Path("/tmp/preview_cache")
+    temp_dir.mkdir(exist_ok=True)
+    temp_file = temp_dir / f"{hash_name}.m4a"
+    
+    # 检查缓存
+    if temp_file.exists():
+        cache_age = _time.time() - temp_file.stat().st_mtime
+        if cache_age < 300:
+            logger.info(f"[音频转码] 使用缓存: {temp_file}")
+            return FileResponse(temp_file, media_type="audio/mp4")
+    
+    # 构建 FFmpeg 命令 - 只转码音频
+    cmd = ["ffmpeg", "-y", "-fflags", "+genpts"]
+    
+    if start > 0:
+        cmd.extend(["-ss", str(start)])
+    
+    cmd.extend(["-i", str(full_path)])
+    
+    if duration > 0:
+        cmd.extend(["-t", str(duration)])
+    
+    # 只提取和转码音频，不要视频
+    cmd.extend([
+        "-vn",                       # 不要视频流
+        "-c:a", "aac",               # 音频转码为 AAC
+        "-b:a", "128k",
+        "-ac", "2",
+        "-movflags", "+faststart",
+        str(temp_file)
+    ])
+    
+    logger.info(f"[音频转码] 开始: {full_path.name} [{start}s - {start + duration}s]")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode != 0:
+            logger.error(f"[音频转码] 失败: {result.stderr.decode()[-300:]}")
+            return Response(status_code=500)
+        logger.info(f"[音频转码] 完成: {temp_file}")
+    except subprocess.TimeoutExpired:
+        logger.error("[音频转码] 超时")
+        return Response(status_code=500)
+    except Exception as e:
+        logger.error(f"[音频转码] 异常: {e}")
+        return Response(status_code=500)
+    
+    return FileResponse(temp_file, media_type="audio/mp4")
 
 @app.get("/api/media/probe")
 async def probe_media_file(path: str, request: Request):
