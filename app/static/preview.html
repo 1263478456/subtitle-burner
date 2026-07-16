@@ -648,36 +648,38 @@ function setupVideoEvents() {
   video.addEventListener('pause', () => {
     document.getElementById('playBtn').textContent = '▶️';
   });
-}
-
-// 进度条点击和拖动
-document.getElementById('progressBar').addEventListener('click', (e) => {
-  const rect = e.currentTarget.getBoundingClientRect();
-  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  video.currentTime = percent * video.duration;
-});
-
-// 进度条拖动支持
-let isDragging = false;
-
-document.getElementById('progressBar').addEventListener('mousedown', (e) => {
-  isDragging = true;
-  const rect = e.currentTarget.getBoundingClientRect();
-  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  video.currentTime = percent * video.duration;
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (!isDragging) return;
+  
+  // 进度条点击和拖动
   const progressBar = document.getElementById('progressBar');
-  const rect = progressBar.getBoundingClientRect();
-  const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-  video.currentTime = percent * video.duration;
-});
-
-document.addEventListener('mouseup', () => {
-  isDragging = false;
-});
+  let isDragging = false;
+  
+  function updateProgress(e) {
+    const rect = progressBar.getBoundingClientRect();
+    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    if (video.duration && !isNaN(video.duration)) {
+      video.currentTime = percent * video.duration;
+    }
+  }
+  
+  progressBar.addEventListener('click', (e) => {
+    updateProgress(e);
+  });
+  
+  progressBar.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    updateProgress(e);
+    e.preventDefault(); // 防止选中文本
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    updateProgress(e);
+  });
+  
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+}
 
 // 视频控制
 function togglePlay() {
@@ -1072,35 +1074,36 @@ async function confirmSelection() {
   if (!mediaBrowserSelected) return;
   
   const fileName = mediaBrowserSelected.split('/').pop();
+  const selectedPath = mediaBrowserSelected; // 保存路径
+  
+  // 先关闭弹窗
+  closeMediaBrowser();
   
   if (mediaBrowserMode === 'video') {
     // 使用预览流转码 API（自动处理 EAC3 等不兼容音频）
-    const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(mediaBrowserSelected);
+    const videoUrl = '/api/media/preview-stream?path=' + encodeURIComponent(selectedPath);
     video.src = videoUrl;
-    state.videoPath = mediaBrowserSelected;
+    state.videoPath = selectedPath;
     document.getElementById('videoName').textContent = fileName;
     showToast('视频已加载: ' + fileName);
     
-    // 检测音频编码并提示
-    try {
-      const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(mediaBrowserSelected));
-      if (probeResponse.ok) {
-        const probeData = await probeResponse.json();
-        if (probeData.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(probeData.audio_codec)) {
-          showToast('音频格式 ' + probeData.audio_codec + ' 将自动转码为 AAC', 'success');
+    // 检测音频编码并提示（不阻塞）
+    fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath))
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && data.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(data.audio_codec)) {
+          showToast('音频格式 ' + data.audio_codec + ' 将自动转码为 AAC', 'success');
         }
-      }
-    } catch (e) {
-      // 忽略探测失败
-    }
+      })
+      .catch(() => {}); // 忽略探测失败
   } else {
     try {
-      const response = await fetch('/api/media/file?path=' + encodeURIComponent(mediaBrowserSelected));
+      const response = await fetch('/api/media/file?path=' + encodeURIComponent(selectedPath));
       if (!response.ok) throw new Error('获取失败');
       
       const data = await response.json();
       state.subtitleContent = data.content;
-      state.subtitlePath = mediaBrowserSelected;
+      state.subtitlePath = selectedPath;
       state.subtitleType = detectSubtitleType(fileName);
       parseSubtitle();
       document.getElementById('subName').textContent = fileName;
@@ -1109,8 +1112,6 @@ async function confirmSelection() {
       showToast('加载字幕失败: ' + error.message, 'error');
     }
   }
-  
-  closeMediaBrowser();
 }
 
 // 应用到压制
