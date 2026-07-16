@@ -280,11 +280,11 @@ input[type="range"]::-webkit-slider-thumb {
 </head>
 <body>
 <header>
-  <div class="header-left">
+  <div class="header-left" id="headerLeft">
     <a href="/" class="btn-back" id="backBtn">← 返回主页</a>
-    <h1>🎬 字幕预览</h1>
+    <h1 id="headerTitle">🎬 字幕预览</h1>
   </div>
-  <div class="header-actions">
+  <div class="header-actions" id="headerActions">
     <button class="btn btn-ghost btn-sm" onclick="loadLocalVideo()">📹 本地视频</button>
     <button class="btn btn-ghost btn-sm" onclick="loadLocalSubtitle()">💬 本地字幕</button>
     <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('video')">📁 媒体库视频</button>
@@ -520,8 +520,9 @@ function isEmbedded() {
 document.addEventListener('DOMContentLoaded', () => {
   if (isEmbedded()) {
     document.body.classList.add('embedded');
-    // 嵌入模式下隐藏整个 header（主页已有标题）
-    document.querySelector('header').style.display = 'none';
+    // 嵌入模式下只隐藏标题和返回按钮，保留操作按钮
+    document.getElementById('backBtn').style.display = 'none';
+    document.getElementById('headerTitle').style.display = 'none';
   }
   loadSavedParams();
   setupVideoEvents();
