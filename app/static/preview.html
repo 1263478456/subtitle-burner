@@ -637,33 +637,31 @@ function setOffset(value) {
 // 视频事件
 function setupVideoEvents() {
   video.addEventListener('timeupdate', () => {
-    // 使用 probe 获取的 duration（完整视频时长）
-    const duration = state.videoDuration || video.duration;
+    // 使用 video.duration（实际视频时长）
+    const duration = video.duration;
     if (!duration || isNaN(duration) || !isFinite(duration)) return;
     
-    // 计算当前在完整视频中的时间位置
-    const currentTime = (state.currentSegmentStart || 0) + video.currentTime;
-    const percent = (currentTime / duration) * 100;
+    // 直接使用 video.currentTime（视频是完整加载的）
+    const percent = (video.currentTime / duration) * 100;
     document.getElementById('progressFill').style.width = percent + '%';
-    document.getElementById('currentTime').textContent = formatTime(currentTime);
+    document.getElementById('currentTime').textContent = formatTime(video.currentTime);
     updateSubtitleDisplay();
   });
   
   video.addEventListener('loadedmetadata', () => {
-    // 显示完整视频时长（从 probe 获取）
-    if (state.videoDuration && state.videoDuration > 0) {
-      document.getElementById('duration').textContent = formatTime(state.videoDuration);
-    } else if (video.duration && isFinite(video.duration)) {
+    // 显示视频时长
+    if (video.duration && isFinite(video.duration)) {
       document.getElementById('duration').textContent = formatTime(video.duration);
+      // 更新 state.videoDuration 为实际时长
+      state.videoDuration = video.duration;
     }
   });
   
   // 添加 durationchange 事件
   video.addEventListener('durationchange', () => {
-    if (state.videoDuration && state.videoDuration > 0) {
-      document.getElementById('duration').textContent = formatTime(state.videoDuration);
-    } else if (video.duration && isFinite(video.duration)) {
+    if (video.duration && isFinite(video.duration)) {
       document.getElementById('duration').textContent = formatTime(video.duration);
+      state.videoDuration = video.duration;
     }
   });
   
@@ -680,18 +678,19 @@ function setupVideoEvents() {
   let isDragging = false;
   
   function getDuration() {
-    return state.videoDuration || video.duration;
+    // 优先使用 video.duration（实际时长）
+    return video.duration || state.videoDuration;
   }
   
   function updateProgress(e) {
     const rect = progressBar.getBoundingClientRect();
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const duration = getDuration();
-    if (duration && duration > 0) {
+    if (duration && duration > 0 && isFinite(duration)) {
       // 计算目标时间
       const targetTime = percent * duration;
       
-      // 直接跳转到目标时间（视频是完整加载的，不需要分段）
+      // 直接跳转到目标时间（视频是完整加载的）
       video.currentTime = targetTime;
       
       // 如果需要转码音频，检查是否需要加载新片段
