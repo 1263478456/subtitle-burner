@@ -294,6 +294,17 @@ class NoCacheFileResponse(_FR):
 async def container_health():
     return {"status": "ok", "version": "2.1"}
 
+@app.get("/api/health")
+async def api_health():
+    """API 健康检查，返回详细信息"""
+    return {
+        "status": "ok",
+        "version": "3.0.0",
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "queue_size": queue.qsize(),
+        "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
+    }
+
 @app.get("/")
 async def index(request: Request):
     if not get_current_user(request):
