@@ -662,7 +662,7 @@ const state = {
   videoDuration: 0,           // 从 probe 获取的完整视频时长
   needAudioTranscode: false,  // 是否需要转码音频
   currentSegmentStart: 0,     // 当前片段的起始时间
-  segmentDuration: 30,        // 片段时长（30秒，减少切换频率）
+  segmentDuration: 20,        // 片段时长
   audioElement: null,         // 音频元素（用于播放转码后的音频）
   burnQueue: [],              // 待压制队列
   params: {
@@ -866,8 +866,8 @@ function setupVideoEvents() {
       const currentStart = state.currentSegmentStart || 0;
       const currentEnd = currentStart + segmentDuration;
       
-      // 距离片段结束还有 3 秒时，预加载下一个片段
-      if (currentTime > currentEnd - 3 && currentTime < currentEnd) {
+      // 距离片段结束还有 10 秒时，预加载下一个片段（给网络留充足缓冲）
+      if (currentTime > currentEnd - 10 && currentTime < currentEnd) {
         const nextStart = currentEnd - 2; // 略有重叠避免卡顿
         loadAudioForSegment(state.videoPath, nextStart);
       }
@@ -1403,7 +1403,7 @@ async function loadAudioForSegment(path, startTime) {
   if (audioLoading) return; // 如果正在加载，跳过
   audioLoading = true;
   
-  const segmentDuration = 30; // 增加到30秒，减少切换频率
+  const segmentDuration = state.segmentDuration || 20; // 使用状态中的片段时长
   const statusEl = document.getElementById('audioStatus');
   
   if (statusEl) {
