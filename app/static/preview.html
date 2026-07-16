@@ -634,28 +634,33 @@ function setOffset(value) {
 // 视频事件
 function setupVideoEvents() {
   video.addEventListener('timeupdate', () => {
-    const duration = video.duration || state.videoDuration;
-    if (!duration || isNaN(duration)) return;
+    // 使用 probe 获取的 duration（完整视频时长）
+    const duration = state.videoDuration || video.duration;
+    if (!duration || isNaN(duration) || !isFinite(duration)) return;
     
-    const percent = (video.currentTime / duration) * 100;
+    // 计算当前在完整视频中的时间位置
+    const currentTime = (state.currentSegmentStart || 0) + video.currentTime;
+    const percent = (currentTime / duration) * 100;
     document.getElementById('progressFill').style.width = percent + '%';
-    document.getElementById('currentTime').textContent = formatTime(video.currentTime);
+    document.getElementById('currentTime').textContent = formatTime(currentTime);
     updateSubtitleDisplay();
   });
   
   video.addEventListener('loadedmetadata', () => {
-    // 如果 video.duration 无效，使用我们获取的 duration
-    const duration = video.duration && isFinite(video.duration) ? video.duration : state.videoDuration;
-    if (duration && duration > 0) {
-      document.getElementById('duration').textContent = formatTime(duration);
+    // 显示完整视频时长（从 probe 获取）
+    if (state.videoDuration && state.videoDuration > 0) {
+      document.getElementById('duration').textContent = formatTime(state.videoDuration);
+    } else if (video.duration && isFinite(video.duration)) {
+      document.getElementById('duration').textContent = formatTime(video.duration);
     }
   });
   
   // 添加 durationchange 事件
   video.addEventListener('durationchange', () => {
-    const duration = video.duration && isFinite(video.duration) ? video.duration : state.videoDuration;
-    if (duration && duration > 0) {
-      document.getElementById('duration').textContent = formatTime(duration);
+    if (state.videoDuration && state.videoDuration > 0) {
+      document.getElementById('duration').textContent = formatTime(state.videoDuration);
+    } else if (video.duration && isFinite(video.duration)) {
+      document.getElementById('duration').textContent = formatTime(video.duration);
     }
   });
   
@@ -672,7 +677,7 @@ function setupVideoEvents() {
   let isDragging = false;
   
   function getDuration() {
-    return video.duration && isFinite(video.duration) ? video.duration : state.videoDuration;
+    return state.videoDuration || video.duration;
   }
   
   function updateProgress(e) {
@@ -680,9 +685,19 @@ function setupVideoEvents() {
     const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const duration = getDuration();
     if (duration && duration > 0) {
-      video.currentTime = percent * duration;
-      // 如果需要转码，检查是否需要加载新片段
-      onSeekToPosition(percent);
+      // 计算目标时间在完整视频中的位置
+      const targetTime = percent * duration;
+      // 计算在当前片段中的位置
+      const segmentStart = state.currentSegmentStart || 0;
+      const timeInSegment = targetTime - segmentStart;
+      
+      // 如果目标时间在当前片段内，直接跳转
+      if (timeInSegment >= 0 && timeInSegment <= (state.segmentDuration || 20)) {
+        video.currentTime = timeInSegment;
+      } else {
+        // 需要加载新片段
+        onSeekToPosition(percent);
+      }
     }
   }
   
