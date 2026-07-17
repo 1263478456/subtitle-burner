@@ -671,6 +671,21 @@ input[type="range"]::-webkit-slider-thumb {
       <button class="modal-close" onclick="closeSavePresetDialog()">✕</button>
     </div>
     <div style="padding:20px; overflow-y:auto; flex:1; min-height:0;">
+      <div style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:10px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;">
+          <input type="radio" name="saveMode" value="new" checked onchange="toggleSaveMode()" style="width:14px; height:14px;">
+          <span style="color:#e5e5e5; font-size:12px;">保存为新预设</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="radio" name="saveMode" value="overwrite" onchange="toggleSaveMode()" style="width:14px; height:14px;">
+          <span style="color:#e5e5e5; font-size:12px;">覆盖已有预设</span>
+        </label>
+        <div id="overwriteSelectWrap" style="display:none; margin-top:8px;">
+          <select id="overwritePresetSelect" onchange="onOverwritePresetChange()" style="width:100%; padding:8px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
+            <option value="">-- 选择要覆盖的预设 --</option>
+          </select>
+        </div>
+      </div>
       <div class="form-group" style="margin-bottom:16px;">
         <label style="display:block; margin-bottom:6px; color:#e5e5e5; font-size:13px;">预设名称 *</label>
         <input type="text" id="presetName" placeholder="例如：电视剧标准、电影大字幕" style="width:100%; padding:10px; background:#222; border:1px solid #444; border-radius:6px; color:#e5e5e5; font-size:13px;">
@@ -2615,10 +2630,64 @@ async function loadPreset(presetId) {
 function showSavePresetDialog() {
   // 从 localStorage 读取当前内嵌字幕状态，同步到弹窗 UI
   syncSubtitleKeepToDialog();
+  // 加载已有预设列表到覆盖下拉框
+  loadOverwritePresetList();
   // 更新参数预览
   updatePresetPreview();
   document.getElementById('savePresetModal').classList.add('active');
   document.getElementById('presetName').focus();
+}
+
+// 加载已有预设到覆盖下拉框
+async function loadOverwritePresetList() {
+  try {
+    const response = await fetch('/api/presets');
+    if (!response.ok) return;
+    const data = await response.json();
+    const select = document.getElementById('overwritePresetSelect');
+    select.innerHTML = '<option value="">-- 选择要覆盖的预设 --</option>';
+    data.presets.forEach(preset => {
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.name + (preset.is_default ? ' ⭐' : '');
+      select.appendChild(option);
+    });
+  } catch (e) {
+    console.error('加载预设列表失败:', e);
+  }
+}
+
+// 切换保存模式
+function toggleSaveMode() {
+  const mode = document.querySelector('input[name="saveMode"]:checked').value;
+  const overwriteWrap = document.getElementById('overwriteSelectWrap');
+  const nameInput = document.getElementById('presetName');
+  const descInput = document.getElementById('presetDescription');
+  
+  if (mode === 'overwrite') {
+    overwriteWrap.style.display = 'block';
+  } else {
+    overwriteWrap.style.display = 'none';
+    nameInput.disabled = false;
+    nameInput.style.opacity = '1';
+    descInput.disabled = false;
+    descInput.style.opacity = '1';
+  }
+}
+
+// 选择要覆盖的预设
+function onOverwritePresetChange() {
+  const select = document.getElementById('overwritePresetSelect');
+  const presetId = select.value;
+  if (!presetId) return;
+  
+  // 从下拉框获取预设名称
+  const option = select.options[select.selectedIndex];
+  document.getElementById('presetName').value = option.textContent.replace(' ⭐', '');
+  document.getElementById('presetName').disabled = true;
+  document.getElementById('presetName').style.opacity = '0.6';
+  document.getElementById('presetDescription').disabled = true;
+  document.getElementById('presetDescription').style.opacity = '0.6';
 }
 
 // 将当前内嵌字幕删除状态同步到保存预设弹窗
@@ -2653,9 +2722,17 @@ function syncSubtitleKeepToDialog() {
 function closeSavePresetDialog() {
   document.getElementById('savePresetModal').classList.remove('active');
   document.getElementById('presetName').value = '';
+  document.getElementById('presetName').disabled = false;
+  document.getElementById('presetName').style.opacity = '1';
   document.getElementById('presetDescription').value = '';
+  document.getElementById('presetDescription').disabled = false;
+  document.getElementById('presetDescription').style.opacity = '1';
   document.getElementById('presetIsDefault').checked = false;
   document.getElementById('subKeepLanguages').value = '';
+  document.getElementById('overwritePresetSelect').innerHTML = '<option value="">-- 选择要覆盖的预设 --</option>';
+  // 恢复保存模式
+  document.querySelector('input[name="saveMode"][value="new"]').checked = true;
+  document.getElementById('overwriteSelectWrap').style.display = 'none';
   // 恢复分类勾选
   document.querySelectorAll('.preset-category').forEach(cb => cb.checked = true);
   document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
@@ -2808,6 +2885,10 @@ async function savePreset() {
   
   params._categories = categories;
   
+  // 判断是新建还是覆盖
+  const saveMode = document.querySelector('input[name="saveMode"]:checked').value;
+  const overwritePresetId = document.getElementById('overwritePresetSelect').value;
+  
   try {
     const fd = new FormData();
     fd.append('name', name);
@@ -2815,10 +2896,20 @@ async function savePreset() {
     fd.append('params', JSON.stringify(params));
     fd.append('is_default', isDefault ? 'true' : 'false');
     
-    const response = await fetch('/api/presets', {
-      method: 'POST',
-      body: fd
-    });
+    let response;
+    if (saveMode === 'overwrite' && overwritePresetId) {
+      // 覆盖已有预设
+      response = await fetch(`/api/presets/${overwritePresetId}`, {
+        method: 'PUT',
+        body: fd
+      });
+    } else {
+      // 新建预设
+      response = await fetch('/api/presets', {
+        method: 'POST',
+        body: fd
+      });
+    }
     
     if (!response.ok) {
       const error = await response.json();
@@ -2826,7 +2917,8 @@ async function savePreset() {
     }
     
     const result = await response.json();
-    showToast(`预设 "${name}" 保存成功`, 'success');
+    const action = (saveMode === 'overwrite' && overwritePresetId) ? '更新' : '保存';
+    showToast(`预设 "${name}" ${action}成功`, 'success');
     
     closeSavePresetDialog();
     refreshPresets();
