@@ -362,10 +362,11 @@ def require_auth(request: Request):
     return user
 
 async def run_burn_task(task_id):
+    logger.info(f"[run_burn_task] 开始执行: {task_id}, 当前内存任务数: {len(tasks)}")
     task = tasks.get(task_id)
     if not task:
         # 尝试从数据库加载任务
-        logger.info(f"[队列工作者] 任务 {task_id} 不在内存中，尝试从数据库加载")
+        logger.info(f"[run_burn_task] 任务 {task_id} 不在内存中，尝试从数据库加载")
         rows = db_query("SELECT * FROM tasks WHERE task_id=?", (task_id,))
         if rows:
             r = rows[0]
@@ -387,11 +388,11 @@ async def run_burn_task(task_id):
                 "error": r["error"]
             }
             tasks[task_id] = task
-            logger.info(f"[队列工作者] 已从数据库加载任务: {task_id} ({r['video_name']})")
+            logger.info(f"[run_burn_task] 已从数据库加载任务: {task_id} ({r['video_name']})")
         else:
-            logger.warning(f"[队列工作者] 任务 {task_id} 数据库中也不存在，跳过")
+            logger.warning(f"[run_burn_task] 任务 {task_id} 数据库中也不存在，跳过")
             return
-    logger.info(f"[队列工作者] 开始处理任务: {task_id}, 视频: {task.get('video_name')}")
+    logger.info(f"[run_burn_task] 开始处理任务: {task_id}, 视频: {task.get('video_name')}")
     try:
         tasks[task_id]["status"] = "processing"
         tasks[task_id]["progress"] = 0
@@ -500,14 +501,18 @@ async def queue_worker():
     logger.info(f"[队列工作者] 启动，并发数: {MAX_CONCURRENT}")
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     async def process_one(task_id):
+        logger.info(f"[队列工作者] process_one 开始: {task_id}")
         async with semaphore:
             logger.info(f"[队列工作者] 获取信号量，处理任务: {task_id}")
             await run_burn_task(task_id)
+        logger.info(f"[队列工作者] process_one 完成: {task_id}")
     while True:
         try:
             task_id = await queue.get()
             logger.info(f"[队列工作者] 从队列获取任务: {task_id}，当前队列大小: {queue.qsize()}")
-            asyncio.create_task(process_one(task_id))
+            logger.info(f"[队列工作者] 创建异步任务: {task_id}")
+            t = asyncio.create_task(process_one(task_id))
+            logger.info(f"[队列工作者] 异步任务已创建: {task_id}, 任务对象: {t}")
         except Exception as e:
             logger.error(f"[队列工作者] 错误: {e}")
 
