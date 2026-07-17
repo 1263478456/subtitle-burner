@@ -23,6 +23,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 import aiofiles
 
+# 从 __init__.py 读取版本号
+from app import __version__ as APP_VERSION
+
 # 配置日志输出到 stdout（Docker 日志捕获）
 import logging
 logging.basicConfig(
@@ -515,14 +518,14 @@ class NoCacheFileResponse(_FR):
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)
 async def container_health():
-    return {"status": "ok", "version": "3.1.2"}
+    return {"status": "ok", "version": APP_VERSION}
 
 @app.get("/api/health")
 async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.1.2",
+        "version": APP_VERSION,
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
