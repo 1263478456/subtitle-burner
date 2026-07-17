@@ -1293,6 +1293,44 @@ async def retry_task(task_id: str, user: str = Depends(require_auth)):
     await queue.put(task_id)
     return {"task_id": task_id, "status": "queued", "queue_size": queue.qsize()}
 
+@app.post("/api/retry-all-failed")
+async def retry_all_failed(user: str = Depends(require_auth)):
+    """批量重试所有失败的任务"""
+    # 查询所有失败的任务
+    failed_tasks = db_query("SELECT task_id, video_name FROM tasks WHERE user=? AND status='failed'", (user,))
+    if not failed_tasks:
+        return {"message": "没有失败的任务", "count": 0}
+    
+    retried_count = 0
+    for task_row in failed_tasks:
+        task_id = task_row["task_id"]
+        now = datetime.now().isoformat()
+        
+        # 更新数据库状态
+        db_execute("UPDATE tasks SET status=?, progress=?, error=?, completed_at=?, created_at=? WHERE task_id=?",
+                   ("queued", 0, None, None, now, task_id))
+        
+        # 更新内存状态（如果存在）
+        if task_id in tasks:
+            tasks[task_id].update({
+                "status": "queued",
+                "progress": 0,
+                "error": None,
+                "completed_at": None,
+                "created_at": now,
+            })
+        
+        # 加入队列
+        await queue.put(task_id)
+        retried_count += 1
+        logger.info(f"[批量重试] 已重新加入队列: {task_id} ({task_row['video_name']})")
+    
+    return {
+        "message": f"已重新加入 {retried_count} 个任务到队列",
+        "count": retried_count,
+        "queue_size": queue.qsize()
+    }
+
 @app.post("/api/stop/{task_id}")
 async def stop_task(task_id: str, user: str = Depends(require_auth)):
     """停止正在执行的任务"""
@@ -1426,6 +1464,47 @@ async def clear_history(user: str = Depends(require_auth)):
             except: pass
     db_execute("DELETE FROM tasks WHERE user=?", (user,))
     return {"message": "已清空"}
+
+@app.post("/api/retry-all-failed")
+async def retry_all_failed(user: str = Depends(require_auth)):
+    """重试所有失败的任务"""
+    failed_tasks = db_query("SELECT task_id FROM tasks WHERE user=? AND status='failed'", (user,))
+    if not failed_tasks:
+        return {"message": "没有失败的任务", "count": 0}
+    
+    count = 0
+    for r in failed_tasks:
+        task_id = r["task_id"]
+        now = datetime.now().isoformat()
+        db_execute("UPDATE tasks SET status=?, progress=0, error=NULL, created_at=? WHERE task_id=?",
+                   ("queued", now, task_id))
+        if task_id in tasks:
+            tasks[task_id].update({"status": "queued", "progress": 0, "error": None, "created_at": now})
+        await queue.put(task_id)
+        count += 1
+    return {"message": f"已重试 {count} 个任务", "count": count}
+
+@app.post("/api/delete-completed")
+async def delete_completed(user: str = Depends(require_auth)):
+    """删除所有已完成的任务"""
+    completed_tasks = db_query("SELECT task_id FROM tasks WHERE user=? AND status='completed'", (user,))
+    if not completed_tasks:
+        return {"message": "没有已完成的任务", "count": 0}
+    
+    count = 0
+    for r in completed_tasks:
+        task_id = r["task_id"]
+        for f in INPUT_DIR.glob(f"{task_id}_*"):
+            try: f.unlink()
+            except: pass
+        for f in OUTPUT_DIR.glob(f"{task_id}_*"):
+            try: f.unlink()
+            except: pass
+        if task_id in tasks:
+            del tasks[task_id]
+        count += 1
+    db_execute("DELETE FROM tasks WHERE user=? AND status='completed'", (user,))
+    return {"message": f"已删除 {count} 个任务", "count": count}
 
 @app.get("/api/stats")
 async def get_stats(user: str = Depends(require_auth)):

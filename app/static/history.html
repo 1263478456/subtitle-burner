@@ -199,6 +199,8 @@ tr:hover td { background: #f1f5f9; }
       <h2>历史记录</h2>
       <div class="toolbar">
         <input type="text" id="search" placeholder="搜索视频名..." />
+        <button class="act-btn" onclick="retryAllFailed()" id="retryAllBtn" style="display:none">🔄 重试失败</button>
+        <button class="act-btn" onclick="deleteCompleted()" id="deleteCompletedBtn" style="display:none">🗑️ 清空已完成</button>
         <button class="act-btn del" onclick="clearAll()">清空全部</button>
       </div>
     </div>
@@ -256,6 +258,16 @@ const loadStats = async () => {
   $('#s-total').textContent = s.total;
   $('#s-queued').textContent = s.queued; $('#s-proc').textContent = s.processing;
   $('#s-ok').textContent = s.completed; $('#s-err').textContent = s.failed;
+
+  // 根据当前筛选状态显示/隐藏按钮
+  const retryAllBtn = document.getElementById('retryAllBtn');
+  const deleteCompletedBtn = document.getElementById('deleteCompletedBtn');
+  if (retryAllBtn) {
+    retryAllBtn.style.display = (currentStatus === 'failed' && s.failed > 0) ? 'inline-block' : 'none';
+  }
+  if (deleteCompletedBtn) {
+    deleteCompletedBtn.style.display = (currentStatus === 'completed' && s.completed > 0) ? 'inline-block' : 'none';
+  }
 };
 
 const loadPage = async () => {
@@ -283,15 +295,65 @@ const goPage = (p) => { page = p; loadPage(); };
 const filterByStatus = (status) => {
   currentStatus = status;
   page = 1; // 重置到第一页
-  
+
   // 更新激活状态样式
   document.querySelectorAll('.stat').forEach(el => el.classList.remove('active'));
-  const statMap = {'': 'stat-all', 'queued': 'stat-queued', 'processing': 'stat-processing', 
+  const statMap = {'': 'stat-all', 'queued': 'stat-queued', 'processing': 'stat-processing',
                    'completed': 'stat-completed', 'failed': 'stat-failed'};
   const activeEl = document.getElementById(statMap[status]);
   if (activeEl) activeEl.classList.add('active');
-  
+
+  // 根据筛选状态显示/隐藏按钮
+  loadStats(); // 会根据 currentStatus 更新按钮显示
+
   loadPage();
+};
+
+const retryAllFailed = async () => {
+  const failedCount = document.getElementById('s-err').textContent;
+  if (failedCount === '0') {
+    alert('没有失败的任务');
+    return;
+  }
+  if (!confirm(`确定要重试所有 ${failedCount} 个失败的任务吗？`)) return;
+
+  try {
+    const r = await fetch('/api/retry-all-failed', { method: 'POST' });
+    const data = await r.json();
+    if (r.ok) {
+      alert(data.message);
+      currentStatus = '';  // 切回全部视图
+      filterByStatus('');
+      loadStats();
+    } else {
+      alert(data.detail || '重试失败');
+    }
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  }
+};
+
+const deleteCompleted = async () => {
+  const completedCount = document.getElementById('s-ok').textContent;
+  if (completedCount === '0') {
+    alert('没有已完成的任务');
+    return;
+  }
+  if (!confirm(`确定要删除所有 ${completedCount} 个已完成的任务吗？此操作不可恢复！`)) return;
+
+  try {
+    const r = await fetch('/api/delete-completed', { method: 'POST' });
+    const data = await r.json();
+    if (r.ok) {
+      alert(data.message);
+      loadStats();
+      loadPage();
+    } else {
+      alert(data.detail || '删除失败');
+    }
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  }
 };
 const dl = (id) => { window.location.href = '/api/download/' + id; };
 const stopTask = async (id) => {
