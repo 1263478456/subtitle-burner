@@ -1700,10 +1700,10 @@ async function confirmSelection() {
           const info = document.getElementById('embeddedSubInfo');
           
           select.innerHTML = '<option value="">-- 加载内嵌字幕 --</option>';
-          probeData.subtitle_streams.forEach(stream => {
+          probeData.subtitle_streams.forEach((stream, arrayIndex) => {
             const label = stream.title || `字幕轨道 ${stream.index}`;
             const lang = stream.language ? ` (${stream.language})` : '';
-            select.innerHTML += `<option value="${stream.index}">${label}${lang} [${stream.codec}]</option>`;
+            select.innerHTML += `<option value="${arrayIndex}">${label}${lang} [${stream.codec}]</option>`;
           });
           
           section.style.display = 'block';
