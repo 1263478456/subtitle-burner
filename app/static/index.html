@@ -22,8 +22,8 @@ header h1 { font-size: 18px;
   background: linear-gradient(135deg, var(--primary), var(--purple));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-nav { display: flex; gap: 8px; }
-nav a, nav button { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; background: transparent; border: none; cursor: pointer; }
+nav { display: flex; gap: 8px; align-items: center; }
+nav a, nav button { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; background: transparent; border: none; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; line-height: 1.4; }
 nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgba(59,130,246,0.1); color: var(--primary); }
 .user { color: var(--muted); font-size: 13px; margin-right: 12px; }
 .user button { padding: 6px 12px; background: transparent; color: var(--muted);

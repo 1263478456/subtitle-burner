@@ -20,8 +20,8 @@ header h1 { font-size: 18px;
   background: linear-gradient(135deg, var(--primary), var(--purple));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-nav { display: flex; gap: 8px; }
-nav a { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; }
+nav { display: flex; gap: 8px; align-items: center; }
+nav a { padding: 8px 16px; border-radius: 6px; color: var(--muted); text-decoration: none; font-size: 13px; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; line-height: 1.4; }
 nav a:hover, nav a.active { background: rgba(59,130,246,0.15); color: var(--text); }
 .user { color: var(--muted); font-size: 13px; }
 .user button { padding: 6px 12px; background: transparent; color: var(--muted);
@@ -78,8 +78,9 @@ tr:hover td { background: #f1f5f9; }
   <h1>🔥 字幕烧录工具</h1>
   <nav>
     <a href="/">主控制台</a>
-    <a href="/preview">字幕预览</a>
+    <a href="/preview">🎬 字幕预览</a>
     <a class="active">历史记录</a>
+    <a href="javascript:void(0)" onclick="showPendingQueueModal()">📋 待压制队列</a>
     <a href="javascript:void(0)" onclick="openAboutModal()">关于</a>
   </nav>
   <div class="user">
@@ -219,6 +220,50 @@ $('#search').addEventListener('input', (e) => {
   searchTimer = setTimeout(() => { page = 1; loadPage(); }, 300);
 });
 
+// 待压制队列
+function showPendingQueueModal() {
+  loadPendingQueue();
+  document.getElementById('pendingQueueModal').style.display = 'flex';
+}
+
+function closePendingQueueModal() {
+  document.getElementById('pendingQueueModal').style.display = 'none';
+}
+
+function loadPendingQueue() {
+  let burnQueue = [];
+  try {
+    const saved = localStorage.getItem('burnQueue');
+    if (saved) burnQueue = JSON.parse(saved);
+  } catch (e) {}
+  
+  const list = document.getElementById('pendingQueueList');
+  const count = document.getElementById('pendingQueueCount');
+  count.textContent = burnQueue.length;
+  
+  if (burnQueue.length === 0) {
+    list.innerHTML = '<div style="text-align:center; padding:40px; color:#94a3b8;">队列为空<br><span style="font-size:12px;">在字幕预览页面添加任务到队列</span></div>';
+    return;
+  }
+  
+  list.innerHTML = burnQueue.map((item, index) => `
+    <div style="display:flex; align-items:center; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px;">
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13px; color:#1e293b; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📹 ${item.videoName || '未知视频'}</div>
+        <div style="font-size:12px; color:#64748b; margin-top:4px;">💬 ${item.subtitleName || '未知字幕'}</div>
+      </div>
+      <button onclick="removeFromPendingQueue(${index})" style="background:transparent; border:1px solid #e2e8f0; color:#ef4444; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px; margin-left:12px;">删除</button>
+    </div>
+  `).join('');
+}
+
+function removeFromPendingQueue(index) {
+  let burnQueue = JSON.parse(localStorage.getItem('burnQueue') || '[]');
+  burnQueue.splice(index, 1);
+  localStorage.setItem('burnQueue', JSON.stringify(burnQueue));
+  loadPendingQueue();
+}
+
 // 关于弹窗
 function openAboutModal() {
   document.getElementById('aboutModal').style.display = 'flex';
@@ -252,6 +297,24 @@ async function loadAboutInfo() {
   setInterval(() => { loadStats(); if (document.querySelector('.status.processing,.status.queued')) loadPage(); }, 5000);
 })();
 </script>
+
+<!-- 待压制队列弹窗 -->
+<div id="pendingQueueModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10001; align-items:center; justify-content:center;" onclick="if(event.target===this)closePendingQueueModal()">
+  <div style="background:#fff; border-radius:12px; width:700px; max-height:80vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div style="padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:16px; margin:0;">📋 待压制队列</h3>
+      <button onclick="closePendingQueueModal()" style="background:none; border:none; cursor:pointer; font-size:18px; color:#999;">✕</button>
+    </div>
+    <div style="padding:20px;">
+      <div id="pendingQueueList" style="margin-bottom:16px;">
+        <div style="text-align:center; padding:40px; color:#94a3b8;">队列为空</div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid #e2e8f0;">
+        <span style="font-size:13px; color:#64748b;">共 <span id="pendingQueueCount">0</span> 个任务</span>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- 关于弹窗 -->
 <div id="aboutModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;" onclick="if(event.target===this)closeAboutModal()">
