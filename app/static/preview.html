@@ -133,8 +133,12 @@ body.embedded .main-container { min-height: 500px; }
   flex-shrink: 0; flex-grow: 0;
   background: var(--panel); border-left: 1px solid var(--border);
   overflow-y: auto; display: flex; flex-direction: column;
-  overflow-y: auto; display: flex; flex-direction: column; flex-shrink: 0;
+  min-height: 0;
 }
+.control-panel::-webkit-scrollbar { width: 6px; }
+.control-panel::-webkit-scrollbar-track { background: transparent; }
+.control-panel::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+.control-panel::-webkit-scrollbar-thumb:hover { background: #666; }
 body.embedded .control-panel { width: 280px; }
 .panel-section { 
   padding: 12px; border-bottom: 1px solid var(--border);
