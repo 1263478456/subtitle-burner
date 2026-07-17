@@ -2601,10 +2601,37 @@ async function loadPreset(presetId) {
 
 // 显示保存预设弹窗
 function showSavePresetDialog() {
+  // 从 localStorage 读取当前内嵌字幕状态，同步到弹窗 UI
+  syncSubtitleKeepToDialog();
   // 更新参数预览
   updatePresetPreview();
   document.getElementById('savePresetModal').classList.add('active');
   document.getElementById('presetName').focus();
+}
+
+// 将当前内嵌字幕删除状态同步到保存预设弹窗
+function syncSubtitleKeepToDialog() {
+  const mode = localStorage.getItem('removeSubtitleMode') || '';
+  const subKeepMode = localStorage.getItem('subKeepMode') || 'all_except';
+  const subKeepLanguages = localStorage.getItem('subKeepLanguages') || '';
+
+  if (mode === 'all') {
+    // 工具栏标记了删除全部
+    document.querySelector('input[name="subKeepMode"][value="delete_all"]').checked = true;
+    document.getElementById('subKeepLanguages').value = '';
+    document.getElementById('subKeepLangSection').style.display = 'none';
+  } else if (mode === 'language' && subKeepLanguages) {
+    // 工具栏标记了按语言删除
+    const radio = document.querySelector(`input[name="subKeepMode"][value="${subKeepMode}"]`);
+    if (radio) radio.checked = true;
+    document.getElementById('subKeepLanguages').value = subKeepLanguages;
+    document.getElementById('subKeepLangSection').style.display = 'block';
+  } else {
+    // 无状态，恢复默认
+    document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
+    document.getElementById('subKeepLanguages').value = '';
+    document.getElementById('subKeepLangSection').style.display = 'block';
+  }
 }
 
 // 关闭保存预设弹窗
@@ -2654,14 +2681,15 @@ function updatePresetPreview() {
   };
   const modeMap = { 'burn': '硬字幕', 'soft': '软字幕' };
   
-  // 字幕语言保留设置
-  const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
-  const subKeepLangs = document.getElementById('subKeepLanguages').value.trim();
+  // 字幕语言保留设置 — 从 localStorage 读取真实状态
+  const removeMode = localStorage.getItem('removeSubtitleMode') || '';
+  const subKeepModeVal = localStorage.getItem('subKeepMode') || 'all_except';
+  const subKeepLangs = localStorage.getItem('subKeepLanguages') || '';
   let subKeepDisplay;
-  if (subKeepMode === 'delete_all') {
+  if (removeMode === 'all') {
     subKeepDisplay = '删除全部内嵌字幕';
-  } else if (subKeepLangs) {
-    const modeLabel = subKeepMode === 'all_except' ? '保留指定语言' : '删除指定语言';
+  } else if (removeMode === 'language' && subKeepLangs) {
+    const modeLabel = subKeepModeVal === 'all_except' ? '保留指定语言' : '删除指定语言';
     subKeepDisplay = `${modeLabel}: ${subKeepLangs}`;
   } else {
     subKeepDisplay = '未设置（保留所有）';
