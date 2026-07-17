@@ -1361,11 +1361,17 @@ async def download_result(task_id: str, user: str = Depends(require_auth)):
     return FileResponse(file_path, media_type="video/mp4", filename=task.get("output_file", file_path.name))
 
 @app.get("/api/history")
-async def list_history(user: str = Depends(require_auth), page: int = 1, page_size: int = 20):
+async def list_history(user: str = Depends(require_auth), page: int = 1, page_size: int = 20, status: str = ""):
     offset = (page - 1) * page_size
-    total = db_query("SELECT COUNT(*) FROM tasks WHERE user=?", (user,))[0][0]
-    rows = db_query("SELECT * FROM tasks WHERE user=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                    (user, page_size, offset))
+    # 构建查询条件
+    if status:
+        total = db_query("SELECT COUNT(*) FROM tasks WHERE user=? AND status=?", (user, status))[0][0]
+        rows = db_query("SELECT * FROM tasks WHERE user=? AND status=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                        (user, status, page_size, offset))
+    else:
+        total = db_query("SELECT COUNT(*) FROM tasks WHERE user=?", (user,))[0][0]
+        rows = db_query("SELECT * FROM tasks WHERE user=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                        (user, page_size, offset))
     items = []
     for r in rows:
         item = dict(r)

@@ -30,7 +30,10 @@ nav a:hover, nav a.active { background: rgba(59,130,246,0.15); color: var(--text
 .container { max-width: 1400px; margin: 24px auto; padding: 0 24px; }
 .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
 .stat { background: var(--panel); border: 1px solid var(--border);
-        border-radius: 8px; padding: 16px; text-align: center; }
+        border-radius: 8px; padding: 16px; text-align: center;
+        cursor: pointer; transition: all 0.2s; }
+.stat:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(59,130,246,0.15); }
+.stat.active { border-color: var(--primary); background: rgba(59,130,246,0.05); box-shadow: 0 2px 8px rgba(59,130,246,0.2); }
 .stat .v { font-size: 24px; font-weight: 700; color: var(--text); }
 .stat .l { font-size: 11px; color: var(--muted); margin-top: 4px; }
 .stat.ok .v { color: var(--ok); } .stat.err .v { color: var(--err); }
@@ -91,11 +94,11 @@ tr:hover td { background: #f1f5f9; }
 
 <div class="container">
   <div class="stats">
-    <div class="stat"><div class="v" id="s-total">0</div><div class="l">总任务</div></div>
-    <div class="stat warn"><div class="v" id="s-queued">0</div><div class="l">队列中</div></div>
-    <div class="stat proc"><div class="v" id="s-proc">0</div><div class="l">处理中</div></div>
-    <div class="stat ok"><div class="v" id="s-ok">0</div><div class="l">已完成</div></div>
-    <div class="stat err"><div class="v" id="s-err">0</div><div class="l">失败</div></div>
+    <div class="stat active" onclick="filterByStatus('')" id="stat-all"><div class="v" id="s-total">0</div><div class="l">总任务</div></div>
+    <div class="stat warn" onclick="filterByStatus('queued')" id="stat-queued"><div class="v" id="s-queued">0</div><div class="l">队列中</div></div>
+    <div class="stat proc" onclick="filterByStatus('processing')" id="stat-processing"><div class="v" id="s-proc">0</div><div class="l">处理中</div></div>
+    <div class="stat ok" onclick="filterByStatus('completed')" id="stat-completed"><div class="v" id="s-ok">0</div><div class="l">已完成</div></div>
+    <div class="stat err" onclick="filterByStatus('failed')" id="stat-failed"><div class="v" id="s-err">0</div><div class="l">失败</div></div>
   </div>
 
   <div class="panel">
@@ -122,7 +125,7 @@ tr:hover td { background: #f1f5f9; }
 </div>
 
 <script>
-let page = 1, pageSize = 20, total = 0;
+let page = 1, pageSize = 20, total = 0, currentStatus = '';
 const $ = (s) => document.querySelector(s);
 const fmtSize = (b) => {
   if (!b) return '-';
@@ -163,7 +166,9 @@ const loadStats = async () => {
 };
 
 const loadPage = async () => {
-  const r = await fetch('/api/history?page=' + page + '&page_size=' + pageSize);
+  let url = '/api/history?page=' + page + '&page_size=' + pageSize;
+  if (currentStatus) url += '&status=' + currentStatus;
+  const r = await fetch(url);
   if (!r.ok) return;
   const data = await r.json(); total = data.total;
   const tb = $('#tbody');
@@ -181,6 +186,20 @@ const renderPager = () => {
 };
 
 const goPage = (p) => { page = p; loadPage(); };
+
+const filterByStatus = (status) => {
+  currentStatus = status;
+  page = 1; // 重置到第一页
+  
+  // 更新激活状态样式
+  document.querySelectorAll('.stat').forEach(el => el.classList.remove('active'));
+  const statMap = {'': 'stat-all', 'queued': 'stat-queued', 'processing': 'stat-processing', 
+                   'completed': 'stat-completed', 'failed': 'stat-failed'};
+  const activeEl = document.getElementById(statMap[status]);
+  if (activeEl) activeEl.classList.add('active');
+  
+  loadPage();
+};
 const dl = (id) => { window.location.href = '/api/download/' + id; };
 const stopTask = async (id) => {
   if (!confirm('确定要停止这个任务吗？')) return;
