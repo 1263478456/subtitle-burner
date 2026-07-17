@@ -92,7 +92,15 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
 .file-input { display: none; }
 .media-tab { display: none; }
 .media-tab.active { display: block; }
-.breadcrumb { color: var(--muted); font-size: 13px; margin-bottom: 12px; word-break: break-all; }
+.breadcrumb { color: var(--muted); font-size: 13px; margin-bottom: 12px; word-break: break-all; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.bc-item { cursor: pointer; padding: 3px 6px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }
+.bc-item:hover { background: rgba(59,130,246,0.1); color: var(--primary); }
+.bc-root { color: var(--primary); font-weight: 500; }
+.bc-parent { color: var(--muted); }
+.bc-parent:hover { color: var(--primary); }
+.bc-current { color: var(--text); font-weight: 500; cursor: default; }
+.bc-current:hover { background: transparent; color: var(--text); }
+.bc-sep { color: var(--dim); font-size: 11px; margin: 0 1px; user-select: none; }
 .media-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
 .media-item { background: var(--bg); border: 1px solid var(--border);
   border-radius: 8px; padding: 12px; cursor: pointer; transition: border-color 0.15s; }

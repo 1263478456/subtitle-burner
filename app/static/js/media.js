@@ -130,13 +130,38 @@ const Media = (() => {
     else toast('No matching pairs in current folder', 'error');
   };
 
+  // 渲染面包屑导航
+  const renderBreadcrumb = (currentPath) => {
+    const bc = $('#mediaBreadcrumb');
+    if (!bc) return;
+    
+    // 构建面包屑路径段
+    const parts = currentPath ? currentPath.split('/').filter(Boolean) : [];
+    let html = '<span class="bc-item bc-root" onclick="Media.loadMedia(\'\')">📁 媒体库</span>';
+    
+    let accPath = '';
+    parts.forEach((part, i) => {
+      accPath += (accPath ? '/' : '') + part;
+      const p = accPath;
+      if (i === parts.length - 1) {
+        // 当前目录（不可点击）
+        html += '<span class="bc-sep">›</span><span class="bc-item bc-current">' + part + '</span>';
+      } else {
+        // 可点击的父级目录
+        html += '<span class="bc-sep">›</span><span class="bc-item bc-parent" onclick="Media.loadMedia(\'' + p.replace(/'/g, "\\'") + '\')">' + part + '</span>';
+      }
+    });
+    
+    bc.innerHTML = html;
+  };
+
   const loadMedia = async (path) => {
     path = path || '';
     mediaPath = path;
     const r = await fetch('/api/media/list?path=' + encodeURIComponent(path));
     if (!r.ok) { toast((await r.json()).detail, 'error'); return; }
     const data = await r.json();
-    $('#mediaBreadcrumb').textContent = ' /' + (data.current_path || '');
+    renderBreadcrumb(data.current_path || '');
     const list = $('#mediaList');
     list.innerHTML = '';
     if (!data.items.length) { list.innerHTML = '<div class="empty">empty</div>'; return; }
