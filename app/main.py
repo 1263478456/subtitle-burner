@@ -484,9 +484,24 @@ async def queue_worker():
 @asynccontextmanager
 async def lifespan(app):
     init_db()
+    recover_stuck_tasks()
     worker = asyncio.create_task(queue_worker())
     yield
     worker.cancel()
+
+def recover_stuck_tasks():
+    """启动时恢复卡住的任务（容器重启后 FFmpeg 进程已消失）"""
+    stuck_tasks = db_query("SELECT task_id, video_name FROM tasks WHERE status IN ('queued', 'processing')")
+    if stuck_tasks:
+        logger.info(f"[启动恢复] 发现 {len(stuck_tasks)} 个卡住的任务，正在重置...")
+        for task in stuck_tasks:
+            task_id = task["task_id"]
+            video_name = task["video_name"]
+            # 重置为 failed 状态，用户可以手动重试
+            db_execute("UPDATE tasks SET status=?, error=?, progress=0 WHERE task_id=?",
+                       ("failed", "容器重启导致任务中断，请手动重试", task_id))
+            logger.info(f"[启动恢复] 已重置任务: {task_id} ({video_name})")
+        logger.info(f"[启动恢复] 完成，共重置 {len(stuck_tasks)} 个任务")
 
 app = FastAPI(title="字幕烧录工具", version="2.1", lifespan=lifespan, docs_url="/docs", redoc_url="/redoc")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
