@@ -680,6 +680,23 @@ input[type="range"]::-webkit-slider-thumb {
           <span style="color:#e5e5e5; font-size:13px;">设为默认预设</span>
         </label>
       </div>
+      <div style="margin-bottom:16px;">
+        <div style="color:#e5e5e5; font-size:13px; font-weight:500; margin-bottom:8px;">保存范围：</div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
+            <input type="checkbox" class="preset-category" value="subtitle_style" checked style="width:14px; height:14px;">
+            字幕样式
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
+            <input type="checkbox" class="preset-category" value="burn_options" checked style="width:14px; height:14px;">
+            压制选项
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
+            <input type="checkbox" class="preset-category" value="time_offset" checked style="width:14px; height:14px;">
+            时间偏移
+          </label>
+        </div>
+      </div>
       <div style="background:#222; border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px; color:#999;">
         <div style="margin-bottom:8px; color:#e5e5e5; font-weight:500;">当前参数预览：</div>
         <div id="presetPreview" style="line-height:1.8;"></div>
@@ -947,6 +964,19 @@ function loadBurnSettings() {
       console.error('Failed to load burn settings:', e);
     }
   }
+}
+
+// 从UI保存压制设置到localStorage
+function loadBurnSettingsFromUI() {
+  const settings = {
+    sub_mode: document.getElementById('burnSubMode').value,
+    keep_original_sub: document.getElementById('burnKeepOriginal').value === 'true',
+    sub_name: document.getElementById('burnSubName').value,
+    codec: document.getElementById('burnCodec').value,
+    crf: document.getElementById('burnCrf').value,
+    preset: document.getElementById('burnPreset').value,
+  };
+  localStorage.setItem('burnSettings', JSON.stringify(settings));
 }
 
 // 从参数更新UI
@@ -2392,6 +2422,17 @@ async function loadPreset(presetId) {
     document.getElementById('shadowOffsetVal').textContent = params.shadowOffset || 2;
     document.getElementById('bgOpacityVal').textContent = params.bgOpacity || 0;
     
+    // 应用压制选项（如果预设中包含）
+    if (params.burnSubMode) document.getElementById('burnSubMode').value = params.burnSubMode;
+    if (params.burnKeepOriginal) document.getElementById('burnKeepOriginal').value = params.burnKeepOriginal;
+    if (params.burnSubName) document.getElementById('burnSubName').value = params.burnSubName;
+    if (params.burnCodec) document.getElementById('burnCodec').value = params.burnCodec;
+    if (params.burnCrf) document.getElementById('burnCrf').value = params.burnCrf;
+    if (params.burnPreset) document.getElementById('burnPreset').value = params.burnPreset;
+    
+    // 保存压制设置到 localStorage
+    loadBurnSettingsFromUI();
+    
     // 更新参数
     updateParams();
     
@@ -2416,6 +2457,8 @@ function closeSavePresetDialog() {
   document.getElementById('presetName').value = '';
   document.getElementById('presetDescription').value = '';
   document.getElementById('presetIsDefault').checked = false;
+  // 恢复分类勾选
+  document.querySelectorAll('.preset-category').forEach(cb => cb.checked = true);
 }
 
 // 更新参数预览
@@ -2426,12 +2469,36 @@ function updatePresetPreview() {
   const positionMap = { 'bottom': '底部', 'top': '顶部', 'center': '居中' };
   const weightMap = { 'normal': '正常', 'bold': '粗体', 'lighter': '细体' };
   
+  // 读取压制选项
+  const burnSubMode = document.getElementById('burnSubMode').value;
+  const burnKeepOriginal = document.getElementById('burnKeepOriginal').value;
+  const burnSubName = document.getElementById('burnSubName').value;
+  const burnCodec = document.getElementById('burnCodec').value;
+  const burnCrf = document.getElementById('burnCrf').value;
+  const burnPreset = document.getElementById('burnPreset').value;
+  
+  const codecMap = {
+    'libx264': 'CPU·H.264', 'libx265': 'CPU·H.265',
+    'h264_nvenc': 'GPU·H.264', 'hevc_nvenc': 'GPU·H.265',
+    'h264_qsv': 'GPU·QSV H.264'
+  };
+  const modeMap = { 'burn': '硬字幕', 'soft': '软字幕' };
+  
+  // 压制选项预览
+  const burnPreview = `
+    <div style="margin-top:6px; padding-top:6px; border-top:1px solid #333;">
+      <div>🔥 模式: ${modeMap[burnSubMode] || '硬字幕'} | 编码: ${codecMap[burnCodec] || burnCodec} | CRF: ${burnCrf}</div>
+      <div>⚙️ 预设: ${burnPreset} | 原字幕: ${burnKeepOriginal === 'true' ? '保留' : '删除'} | 轨道名: ${burnSubName}</div>
+    </div>
+  `;
+  
   preview.innerHTML = `
     <div>⏱️ 偏移: ${p.timeOffset}s</div>
     <div>📍 位置: ${positionMap[p.positionY] || '底部'} | 底边距: ${p.marginBottom}px | 顶边距: ${p.marginTop}px</div>
     <div>🔤 字号: ${p.fontSize}px | 字体: ${p.fontFamily} | 粗细: ${weightMap[p.fontWeight] || '粗体'}</div>
     <div>🎨 颜色: <span style="color:${p.fontColor}">${p.fontColor}</span></div>
     <div>✨ 描边: ${p.outlineWidth}px | 阴影: ${p.shadowOffset}px | 背景: ${p.bgOpacity}%</div>
+    ${burnPreview}
   `;
 }
 
@@ -2446,11 +2513,49 @@ async function savePreset() {
   const description = document.getElementById('presetDescription').value.trim();
   const isDefault = document.getElementById('presetIsDefault').checked;
   
+  // 根据选中的分类收集参数
+  const categories = [...document.querySelectorAll('.preset-category:checked')].map(cb => cb.value);
+  const params = {};
+  
+  if (categories.includes('subtitle_style')) {
+    params.fontSize = state.params.fontSize;
+    params.fontFamily = state.params.fontFamily;
+    params.fontColor = state.params.fontColor;
+    params.fontWeight = state.params.fontWeight;
+    params.positionY = state.params.positionY;
+    params.marginBottom = state.params.marginBottom;
+    params.marginTop = state.params.marginTop;
+    params.outlineWidth = state.params.outlineWidth;
+    params.outlineColor = state.params.outlineColor;
+    params.shadowOffset = state.params.shadowOffset;
+    params.bgOpacity = state.params.bgOpacity;
+  }
+  
+  if (categories.includes('burn_options')) {
+    params.burnSubMode = document.getElementById('burnSubMode').value;
+    params.burnKeepOriginal = document.getElementById('burnKeepOriginal').value;
+    params.burnSubName = document.getElementById('burnSubName').value;
+    params.burnCodec = document.getElementById('burnCodec').value;
+    params.burnCrf = document.getElementById('burnCrf').value;
+    params.burnPreset = document.getElementById('burnPreset').value;
+  }
+  
+  if (categories.includes('time_offset')) {
+    params.timeOffset = state.params.timeOffset;
+  }
+  
+  if (categories.length === 0) {
+    showToast('请至少选择一个保存范围', 'error');
+    return;
+  }
+  
+  params._categories = categories;
+  
   try {
     const fd = new FormData();
     fd.append('name', name);
     fd.append('description', description);
-    fd.append('params', JSON.stringify(state.params));
+    fd.append('params', JSON.stringify(params));
     fd.append('is_default', isDefault ? 'true' : 'false');
     
     const response = await fetch('/api/presets', {

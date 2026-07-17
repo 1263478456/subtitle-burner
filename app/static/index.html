@@ -383,6 +383,17 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
         </div>
       </div>
 
+      <div class="form-row" style="margin-top:14px; background:#f0f4ff; border:1px solid #bfdbfe; border-radius:8px; padding:12px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+          <label style="font-size:12px; color:#3b82f6; font-weight:500;">💾 套用预设</label>
+          <select id="presetSelect" onchange="applyPresetToForm(this.value)" style="flex:1; padding:6px 10px; border-radius:4px; border:1px solid #bfdbfe; font-size:12px;">
+            <option value="">-- 选择预设 --</option>
+          </select>
+          <button class="btn-sm outline" onclick="refreshIndexPresets()" title="刷新" style="padding:4px 8px; font-size:11px;">🔄</button>
+        </div>
+        <div id="presetInfo" style="font-size:11px; color:#64748b; display:none; padding:6px 8px; background:#fff; border-radius:4px;"></div>
+      </div>
+
       <div class="form-row" style="margin-top:14px">
         <label>字幕样式（仅 SRT/VTT）</label>
         <input type="text" id="style" placeholder="FontSize=20,PrimaryColour=&H00FFFFFF,Outline=2">
@@ -738,10 +749,65 @@ let me = null, gpuStatus = null;
   // 进入页面后刷新一次按钮状态
   checkReady();
   Queue.pollTasks();
+  // 加载预设列表
+  refreshIndexPresets();
 
   // 暴露一个手动调用入口给用户测试
   console.log('[init] ready. Try: checkReady() to refresh, Media.getPairs().length to see pairs');
 })();
+
+// ============ 预设系统 ============
+
+async function refreshIndexPresets() {
+  try {
+    const response = await fetch('/api/presets');
+    if (!response.ok) return;
+    const data = await response.json();
+    const select = document.getElementById('presetSelect');
+    if (!select) return;
+    select.innerHTML = '<option value="">-- 选择预设 --</option>';
+    data.presets.forEach(preset => {
+      const option = document.createElement('option');
+      option.value = preset.id;
+      option.textContent = preset.name + (preset.is_default ? ' ⭐' : '');
+      select.appendChild(option);
+    });
+  } catch (e) {
+    console.error('加载预设列表失败:', e);
+  }
+}
+
+async function applyPresetToForm(presetId) {
+  if (!presetId) {
+    document.getElementById('presetInfo').style.display = 'none';
+    return;
+  }
+  try {
+    const response = await fetch(`/api/presets/${presetId}`);
+    if (!response.ok) return;
+    const preset = await response.json();
+    const params = preset.params;
+    
+    // 应用压制选项
+    if (params.burnSubMode) document.getElementById('subMode').value = params.burnSubMode;
+    if (params.burnKeepOriginal) document.getElementById('keepOriginalSub').value = params.burnKeepOriginal;
+    if (params.burnCodec) document.getElementById('codec').value = params.burnCodec;
+    if (params.burnCrf) document.getElementById('crf').value = params.burnCrf;
+    if (params.burnPreset) document.getElementById('preset').value = params.burnPreset;
+    
+    // 显示预设信息
+    const info = document.getElementById('presetInfo');
+    info.style.display = 'block';
+    const parts = [];
+    if (params.burnCodec) parts.push(params.burnCodec);
+    if (params.burnCrf) parts.push('CRF ' + params.burnCrf);
+    if (params.burnPreset) parts.push(params.burnPreset);
+    info.innerHTML = `✅ 已套用「${preset.name}」` + (parts.length ? ': ' + parts.join(' | ') : '');
+    
+  } catch (e) {
+    console.error('加载预设失败:', e);
+  }
+}
 </script>
 </body>
 </html>
