@@ -643,6 +643,9 @@ async function startBatchBurnFromQueue() {
       fd.append('keep_original_sub', keepOriginal);
       fd.append('sub_name', subName);
       fd.append('preview_params', JSON.stringify(item.params || {}));
+      // 传递延迟删除字幕参数
+      fd.append('remove_subtitle_indices', localStorage.getItem('removeSubtitleIndices') || '');
+      fd.append('remove_subtitle_mode', localStorage.getItem('removeSubtitleMode') || '');
       
       const response = await fetch('/api/media/burn', { method: 'POST', body: fd });
       

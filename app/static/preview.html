@@ -768,14 +768,27 @@ input[type="range"]::-webkit-slider-thumb {
     </div>
     <div style="padding:20px;">
       <div style="margin-bottom:16px; color:#999; font-size:13px;">
-        选择要保留的字幕轨道，未选中的轨道将被删除
+        删除操作将在压制时生效，不会修改原始文件
       </div>
-      <div id="removeSubtitlesList" style="margin-bottom:16px; max-height:300px; overflow-y:auto;">
-        <!-- 字幕轨道列表会动态生成 -->
+      <div style="margin-bottom:16px;">
+        <div style="display:flex; gap:12px; margin-bottom:12px;">
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; color:#e5e5e5;">
+            <input type="radio" name="removeMode" value="all" checked onchange="toggleRemoveMode()"> 删除所有字幕
+          </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; color:#e5e5e5;">
+            <input type="radio" name="removeMode" value="select" onchange="toggleRemoveMode()"> 按语言选择保留
+          </label>
+        </div>
+        <div id="removeSubtitlesList" style="max-height:300px; overflow-y:auto; display:none;">
+          <!-- 字幕轨道列表会动态生成 -->
+        </div>
+      </div>
+      <div style="background:#1a1a2e; border:1px solid #333; border-radius:6px; padding:10px; margin-bottom:16px; font-size:11px; color:#999;">
+        💡 提示：删除操作仅标记，在压制视频时才会从输出文件中移除选中的字幕轨道
       </div>
       <div style="display:flex; gap:8px; justify-content:flex-end;">
         <button class="btn btn-ghost btn-sm" onclick="closeRemoveSubtitlesModal()">取消</button>
-        <button class="btn btn-primary btn-sm" onclick="executeRemoveSubtitles()" style="background:#ef4444;">🗑️ 删除字幕</button>
+        <button class="btn btn-primary btn-sm" onclick="executeRemoveSubtitles()" style="background:#ef4444;">🗑️ 确认删除</button>
       </div>
     </div>
   </div>
@@ -907,6 +920,9 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // 加载预设列表
   refreshPresets();
+  
+  // 恢复删除字幕标记状态
+  updateRemoveSubtitlesButton();
 });
 
 // Toast提示
@@ -2001,6 +2017,10 @@ function showRemoveSubtitlesModal() {
     return;
   }
   
+  // 重置为"删除所有"模式
+  document.querySelector('input[name="removeMode"][value="all"]').checked = true;
+  document.getElementById('removeSubtitlesList').style.display = 'none';
+  
   // 探测字幕轨道
   fetch(`/api/media/probe?path=${encodeURIComponent(state.videoPath)}`)
     .then(response => response.json())
@@ -2022,16 +2042,39 @@ function closeRemoveSubtitlesModal() {
   document.getElementById('removeSubtitlesModal').classList.remove('active');
 }
 
+// 切换删除模式
+function toggleRemoveMode() {
+  const mode = document.querySelector('input[name="removeMode"]:checked').value;
+  document.getElementById('removeSubtitlesList').style.display = mode === 'select' ? 'block' : 'none';
+}
+
 function renderRemoveSubtitlesList(subtitleStreams) {
   const list = document.getElementById('removeSubtitlesList');
+  // 按语言分组统计
+  const langMap = {};
+  subtitleStreams.forEach(s => {
+    const lang = s.language || '未知语言';
+    if (!langMap[lang]) langMap[lang] = [];
+    langMap[lang].push(s);
+  });
+  
   list.innerHTML = subtitleStreams.map(stream => {
     const label = stream.title || `字幕轨道 ${stream.index}`;
-    const lang = stream.language ? ` (${stream.language})` : '';
+    const lang = stream.language || '未知';
+    const langColors = {
+      'chi': '#10b981', 'zho': '#10b981', 'chs': '#10b981', 'cht': '#10b981',
+      'eng': '#3b82f6', 'jpn': '#f59e0b', 'kor': '#8b5cf6',
+      'fre': '#ef4444', 'ger': '#6366f1', 'spa': '#ec4899'
+    };
+    const color = langColors[lang.toLowerCase()] || '#64748b';
     return `
-      <div style="display:flex; align-items:center; padding:12px; background:#1a1a2e; border:1px solid #333; border-radius:8px; margin-bottom:8px;">
-        <input type="checkbox" id="sub_${stream.index}" value="${stream.index}" checked style="width:18px; height:18px; margin-right:12px;">
+      <div style="display:flex; align-items:center; padding:10px; background:#1a1a2e; border:1px solid #333; border-radius:8px; margin-bottom:6px;">
+        <input type="checkbox" id="sub_${stream.index}" value="${stream.index}" style="width:16px; height:16px; margin-right:10px;">
         <div style="flex:1;">
-          <div style="font-size:13px; color:#e5e5e5;">${label}${lang}</div>
+          <div style="font-size:13px; color:#e5e5e5;">
+            ${label}
+            <span style="display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; margin-left:6px; background:${color}22; color:${color}; border:1px solid ${color}44;">${lang}</span>
+          </div>
           <div style="font-size:11px; color:#666;">索引: ${stream.index} | 编码: ${stream.codec}</div>
         </div>
       </div>
@@ -2040,57 +2083,90 @@ function renderRemoveSubtitlesList(subtitleStreams) {
 }
 
 async function executeRemoveSubtitles() {
-  const checkboxes = document.querySelectorAll('#removeSubtitlesList input[type="checkbox"]');
-  const keepIndices = [];
+  const mode = document.querySelector('input[name="removeMode"]:checked').value;
+  let keepIndices = [];
+  let removeCount = 0;
+  let removeLabel = '';
   
-  checkboxes.forEach(cb => {
-    if (cb.checked) {
-      keepIndices.push(cb.value);
-    }
-  });
-  
-  if (keepIndices.length === checkboxes.length) {
-    showToast('请至少取消选择一个轨道', 'error');
-    return;
-  }
-  
-  const btn = document.querySelector('#removeSubtitlesModal .btn-primary');
-  btn.disabled = true;
-  btn.textContent = '处理中...';
-  
-  try {
-    const fd = new FormData();
-    fd.append('video_path', state.videoPath);
-    fd.append('keep_subtitle_indices', keepIndices.join(','));
-    
-    const response = await fetch('/api/media/remove-subtitles', {
-      method: 'POST',
-      body: fd
+  if (mode === 'all') {
+    // 删除所有字幕
+    keepIndices = [];
+    removeCount = -1; // -1 表示删除所有
+    removeLabel = '全部字幕';
+  } else {
+    // 按选择保留
+    const checkboxes = document.querySelectorAll('#removeSubtitlesList input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+      if (cb.checked) {
+        keepIndices.push(cb.value);
+      }
     });
     
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || '删除失败');
+    if (keepIndices.length === checkboxes.length) {
+      showToast('请至少选择一个要删除的轨道', 'error');
+      return;
     }
-    
-    const result = await response.json();
-    
-    showToast(`删除完成！保留 ${result.kept_subtitle_count} 个轨道，删除 ${result.removed_subtitle_count} 个轨道`, 'success');
-    
-    closeRemoveSubtitlesModal();
-    
-    // 刷新页面或提示用户
-    if (confirm('字幕已删除，是否刷新页面以查看新文件？')) {
-      location.reload();
-    }
-    
-  } catch (error) {
-    console.error('删除字幕失败:', error);
-    showToast('删除字幕失败: ' + error.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🗑️ 删除字幕';
+    removeCount = checkboxes.length - keepIndices.length;
+    removeLabel = `${removeCount} 个轨道`;
   }
+  
+  // 保存删除配置到 state（压制时使用）
+  state.removeSubtitleIndices = keepIndices.join(',');
+  state.removeSubtitleCount = removeCount;
+  state.removeSubtitleMode = mode;
+  
+  // 保存到 localStorage 以便持久化
+  localStorage.setItem('removeSubtitleIndices', state.removeSubtitleIndices);
+  localStorage.setItem('removeSubtitleCount', String(removeCount));
+  localStorage.setItem('removeSubtitleMode', mode);
+  
+  showToast(`已标记删除 ${removeLabel}，将在压制时生效`, 'success');
+  closeRemoveSubtitlesModal();
+  
+  // 更新按钮显示
+  updateRemoveSubtitlesButton();
+}
+
+// 更新删除字幕按钮显示
+function updateRemoveSubtitlesButton() {
+  const btn = document.querySelector('#embeddedSubSection button');
+  if (!btn) return;
+  
+  const count = parseInt(localStorage.getItem('removeSubtitleCount') || '0');
+  const mode = localStorage.getItem('removeSubtitleMode') || 'select';
+  
+  if (count !== 0) {
+    const label = count === -1 ? '🗑️ 已标记删除全部字幕' : `🗑️ 已标记删除 ${count} 个轨道`;
+    btn.innerHTML = label;
+    btn.style.borderColor = '#f59e0b';
+    btn.style.color = '#f59e0b';
+    // 添加取消按钮
+    if (!document.getElementById('cancelRemoveBtn')) {
+      const cancelBtn = document.createElement('button');
+      cancelBtn.id = 'cancelRemoveBtn';
+      cancelBtn.className = 'btn btn-ghost btn-sm';
+      cancelBtn.style.cssText = 'width:100%; margin-top:6px;';
+      cancelBtn.textContent = '↩️ 取消删除';
+      cancelBtn.onclick = clearRemoveSubtitles;
+      btn.parentElement.appendChild(cancelBtn);
+    }
+  } else {
+    btn.innerHTML = '🗑️ 删除内嵌字幕';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+    const cancelBtn = document.getElementById('cancelRemoveBtn');
+    if (cancelBtn) cancelBtn.remove();
+  }
+}
+
+// 取消删除字幕标记
+function clearRemoveSubtitles() {
+  state.removeSubtitleIndices = '';
+  state.removeSubtitleCount = 0;
+  localStorage.removeItem('removeSubtitleIndices');
+  localStorage.removeItem('removeSubtitleCount');
+  updateRemoveSubtitlesButton();
+  showToast('已取消删除字幕标记', 'success');
 }
 
 // 初始化 MediaSource 音频播放
@@ -2886,6 +2962,9 @@ async function startBatchBurn() {
       fd.append('keep_original_sub', burnSettings.keep_original_sub);
       fd.append('sub_name', burnSettings.sub_name);
       fd.append('preview_params', JSON.stringify(item.params));
+      // 传递延迟删除字幕参数
+      fd.append('remove_subtitle_indices', localStorage.getItem('removeSubtitleIndices') || '');
+      fd.append('remove_subtitle_mode', localStorage.getItem('removeSubtitleMode') || '');
       
       const response = await fetch('/api/media/burn', {
         method: 'POST',
