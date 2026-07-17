@@ -85,6 +85,52 @@ body.embedded .main-container { min-height: 0; }
   white-space: pre-wrap; word-wrap: break-word;
 }
 
+/* Safe Area Guide */
+.safe-area-guide {
+  position: absolute;
+  pointer-events: none;
+  display: none;
+  z-index: 5;
+}
+.safe-area-guide.visible { display: block; }
+.safe-area-border {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  border: 2px dashed rgba(255, 80, 80, 0.7);
+  border-radius: 2px;
+}
+.safe-area-label {
+  position: absolute; top: 4px; left: 6px;
+  font-size: 10px; color: rgba(255, 80, 80, 0.85);
+  font-family: monospace; font-weight: bold;
+  background: rgba(0,0,0,0.5); padding: 1px 5px; border-radius: 3px;
+  white-space: nowrap;
+}
+.safe-area-title {
+  position: absolute;
+  top: 8%; left: 8%; right: 8%; bottom: 8%;
+  border: 1px dashed rgba(255, 200, 0, 0.5);
+  border-radius: 2px;
+}
+.safe-area-title-label {
+  position: absolute; top: 3px; right: 5px;
+  font-size: 9px; color: rgba(255, 200, 0, 0.7);
+  font-family: monospace;
+  background: rgba(0,0,0,0.5); padding: 1px 4px; border-radius: 3px;
+  white-space: nowrap;
+}
+.safe-area-grid {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+}
+.safe-area-grid .hline {
+  position: absolute; left: 0; right: 0; height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.safe-area-grid .vline {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /* Video Controls */
 .video-controls { 
   background: var(--panel); border-top: 1px solid var(--border);
@@ -318,6 +364,23 @@ input[type="range"]::-webkit-slider-thumb {
     <div class="video-wrapper">
       <video id="videoPlayer"></video>
       <div class="subtitle-overlay" id="subtitleOverlay"></div>
+      <!-- Safe Area Guide -->
+      <div class="safe-area-guide" id="safeAreaGuide">
+        <div class="safe-area-border">
+          <span class="safe-area-label" id="safeAreaLabel">视频安全区</span>
+        </div>
+        <div class="safe-area-title">
+          <span class="safe-area-title-label">标题安全区 80%</span>
+        </div>
+        <div class="safe-area-grid">
+          <div class="hline" style="top:25%"></div>
+          <div class="hline" style="top:50%"></div>
+          <div class="hline" style="top:75%"></div>
+          <div class="vline" style="left:25%"></div>
+          <div class="vline" style="left:50%"></div>
+          <div class="vline" style="left:75%"></div>
+        </div>
+      </div>
       <div class="loading" id="loading" style="display:none">
         <div class="loading-spinner"></div>
         <div>加载中...</div>
@@ -350,6 +413,7 @@ input[type="range"]::-webkit-slider-thumb {
             <option value="2">2x</option>
           </select>
         </div>
+        <button onclick="toggleSafeArea()" id="safeAreaBtn" title="显示/隐藏安全区参考线" style="background:transparent;border:1px solid #444;color:#999;cursor:pointer;font-size:11px;padding:3px 8px;border-radius:4px;white-space:nowrap;">📐 安全区</button>
       </div>
     </div>
   </div>
@@ -748,6 +812,70 @@ let mediaBrowserSelected = null;
 const video = document.getElementById('videoPlayer');
 const overlay = document.getElementById('subtitleOverlay');
 
+// 安全区状态
+let safeAreaVisible = false;
+
+// 更新安全区位置
+function updateSafeArea() {
+  const guide = document.getElementById('safeAreaGuide');
+  if (!guide || !guide.classList.contains('visible')) return;
+  if (!video.videoWidth || !video.videoHeight) return;
+
+  const wrapper = document.querySelector('.video-wrapper');
+  const ww = wrapper.clientWidth, wh = wrapper.clientHeight;
+  const vw = video.videoWidth, vh = video.videoHeight;
+
+  // 计算 object-fit: contain 后的实际显示区域
+  const containerRatio = ww / wh;
+  const videoRatio = vw / vh;
+  let displayW, displayH, offsetX, offsetY;
+
+  if (videoRatio > containerRatio) {
+    // 视频更宽 — 左右留黑边
+    displayW = ww;
+    displayH = ww / videoRatio;
+    offsetX = 0;
+    offsetY = (wh - displayH) / 2;
+  } else {
+    // 视频更高 — 上下留黑边
+    displayH = wh;
+    displayW = wh * videoRatio;
+    offsetX = (ww - displayW) / 2;
+    offsetY = 0;
+  }
+
+  guide.style.left = offsetX + 'px';
+  guide.style.top = offsetY + 'px';
+  guide.style.width = displayW + 'px';
+  guide.style.height = displayH + 'px';
+
+  // 更新标签
+  document.getElementById('safeAreaLabel').textContent =
+    `视频安全区 ${vw}×${vh}`;
+}
+
+// 切换安全区显示
+function toggleSafeArea() {
+  safeAreaVisible = !safeAreaVisible;
+  const guide = document.getElementById('safeAreaGuide');
+  const btn = document.getElementById('safeAreaBtn');
+  if (safeAreaVisible) {
+    guide.classList.add('visible');
+    btn.style.borderColor = '#3b82f6';
+    btn.style.color = '#3b82f6';
+    updateSafeArea();
+  } else {
+    guide.classList.remove('visible');
+    btn.style.borderColor = '#444';
+    btn.style.color = '#999';
+  }
+}
+
+// 窗口 resize 时更新安全区
+window.addEventListener('resize', () => {
+  if (safeAreaVisible) updateSafeArea();
+});
+
 // 检测是否嵌入模式
 function isEmbedded() {
   return window.self !== window.top;
@@ -945,6 +1073,8 @@ function setupVideoEvents() {
       // 更新 state.videoDuration 为实际时长
       state.videoDuration = video.duration;
     }
+    // 更新安全区
+    updateSafeArea();
   });
   
   // 添加 durationchange 事件
