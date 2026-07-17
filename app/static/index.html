@@ -794,25 +794,84 @@ async function applyPresetToForm(presetId) {
     const preset = await response.json();
     const params = preset.params;
     
-    // 应用压制选项
-    if (params.burnSubMode) document.getElementById('subMode').value = params.burnSubMode;
-    if (params.burnKeepOriginal) document.getElementById('keepOriginalSub').value = params.burnKeepOriginal;
-    if (params.burnCodec) document.getElementById('codec').value = params.burnCodec;
-    if (params.burnCrf) document.getElementById('crf').value = params.burnCrf;
-    if (params.burnPreset) document.getElementById('preset').value = params.burnPreset;
+    // 检测当前表单值与预设值是否有冲突
+    const currentCodec = document.getElementById('codec').value;
+    const currentCrf = document.getElementById('crf').value;
+    const currentPresetVal = document.getElementById('preset').value;
+    const currentSubMode = document.getElementById('subMode').value;
     
-    // 显示预设信息
-    const info = document.getElementById('presetInfo');
-    info.style.display = 'block';
-    const parts = [];
-    if (params.burnCodec) parts.push(params.burnCodec);
-    if (params.burnCrf) parts.push('CRF ' + params.burnCrf);
-    if (params.burnPreset) parts.push(params.burnPreset);
-    info.innerHTML = `✅ 已套用「${preset.name}」` + (parts.length ? ': ' + parts.join(' | ') : '');
+    const conflicts = [];
+    if (params.burnCodec && params.burnCodec !== currentCodec) conflicts.push('编码器');
+    if (params.burnCrf && String(params.burnCrf) !== String(currentCrf)) conflicts.push('CRF');
+    if (params.burnPreset && params.burnPreset !== currentPresetVal) conflicts.push('预设');
+    if (params.burnSubMode && params.burnSubMode !== currentSubMode) conflicts.push('字幕模式');
     
+    if (conflicts.length > 0) {
+      // 有冲突，弹出选择对话框
+      showPresetConflictDialog(preset, params, conflicts);
+    } else {
+      // 无冲突，直接应用
+      applyPresetValues(params);
+      showPresetInfo(preset.name, params);
+    }
   } catch (e) {
     console.error('加载预设失败:', e);
   }
+}
+
+function showPresetConflictDialog(preset, params, conflicts) {
+  const overlay = document.createElement('div');
+  overlay.id = 'presetConflictOverlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center;';
+  
+  const conflictList = conflicts.map(c => `<span style="color:#f59e0b;">${c}</span>`).join('、');
+  
+  overlay.innerHTML = `
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;width:400px;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+      <div style="padding:16px 20px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center;">
+        <h3 style="font-size:14px;color:#e5e5e5;margin:0;">⚠️ 预设参数冲突</h3>
+        <button onclick="closePresetConflict()" style="background:none;border:none;color:#999;cursor:pointer;font-size:16px;">✕</button>
+      </div>
+      <div style="padding:20px;">
+        <div style="font-size:13px;color:#ccc;margin-bottom:12px;">
+          预设「${preset.name}」与当前表单存在差异：<br>
+          <span style="font-size:12px;color:#999;">${conflictList}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button onclick="closePresetConflict(); applyPresetValues(${JSON.stringify(params).replace(/"/g, '&quot;')}); showPresetInfo('${preset.name}', ${JSON.stringify(params).replace(/"/g, '&quot;')});" style="width:100%;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">
+            🔄 使用预设值（覆盖当前设置）
+          </button>
+          <button onclick="closePresetConflict(); showPresetInfo('${preset.name}', ${JSON.stringify(params).replace(/"/g, '&quot;')});" style="width:100%;padding:10px;background:#333;color:#ccc;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:13px;">
+            📋 保留当前值（仅记录预设）
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function closePresetConflict() {
+  const overlay = document.getElementById('presetConflictOverlay');
+  if (overlay) overlay.remove();
+}
+
+function applyPresetValues(params) {
+  if (params.burnSubMode) document.getElementById('subMode').value = params.burnSubMode;
+  if (params.burnKeepOriginal) document.getElementById('keepOriginalSub').value = params.burnKeepOriginal;
+  if (params.burnCodec) document.getElementById('codec').value = params.burnCodec;
+  if (params.burnCrf) document.getElementById('crf').value = params.burnCrf;
+  if (params.burnPreset) document.getElementById('preset').value = params.burnPreset;
+}
+
+function showPresetInfo(name, params) {
+  const info = document.getElementById('presetInfo');
+  info.style.display = 'block';
+  const parts = [];
+  if (params.burnCodec) parts.push(params.burnCodec);
+  if (params.burnCrf) parts.push('CRF ' + params.burnCrf);
+  if (params.burnPreset) parts.push(params.burnPreset);
+  info.innerHTML = `✅ 已套用「${name}」` + (parts.length ? ': ' + parts.join(' | ') : '');
 }
 </script>
 </body>

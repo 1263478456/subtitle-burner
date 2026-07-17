@@ -701,12 +701,12 @@ input[type="range"]::-webkit-slider-thumb {
             时间偏移
           </label>
           <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
-            <input type="checkbox" class="preset-category" value="subtitle_keep" checked style="width:14px; height:14px;">
+            <input type="checkbox" class="preset-category" value="subtitle_keep" checked onchange="toggleSubtitleKeepSection()" style="width:14px; height:14px;">
             内嵌字幕保留
           </label>
         </div>
       </div>
-      <div id="subtitleKeepSection" style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:12px;">
+      <div id="subtitleKeepSection" style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:12px; display:none;">
         <div style="color:#10b981; font-size:12px; font-weight:500; margin-bottom:8px;">🎬 内嵌字幕处理</div>
         <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
@@ -2615,19 +2615,22 @@ function syncSubtitleKeepToDialog() {
   const subKeepMode = localStorage.getItem('subKeepMode') || 'all_except';
   const subKeepLanguages = localStorage.getItem('subKeepLanguages') || '';
 
+  // 根据是否有字幕删除状态决定复选框勾选和区域可见性
+  const hasSubtitleSetting = mode === 'all' || (mode === 'language' && subKeepLanguages);
+  const checkbox = document.querySelector('.preset-category[value="subtitle_keep"]');
+  checkbox.checked = hasSubtitleSetting;
+  toggleSubtitleKeepSection();
+
   if (mode === 'all') {
-    // 工具栏标记了删除全部
     document.querySelector('input[name="subKeepMode"][value="delete_all"]').checked = true;
     document.getElementById('subKeepLanguages').value = '';
     document.getElementById('subKeepLangSection').style.display = 'none';
   } else if (mode === 'language' && subKeepLanguages) {
-    // 工具栏标记了按语言删除
     const radio = document.querySelector(`input[name="subKeepMode"][value="${subKeepMode}"]`);
     if (radio) radio.checked = true;
     document.getElementById('subKeepLanguages').value = subKeepLanguages;
     document.getElementById('subKeepLangSection').style.display = 'block';
   } else {
-    // 无状态，恢复默认
     document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
     document.getElementById('subKeepLanguages').value = '';
     document.getElementById('subKeepLangSection').style.display = 'block';
@@ -2656,6 +2659,14 @@ function toggleSubKeepMode() {
   } else {
     langSection.style.display = 'block';
   }
+}
+
+// 切换内嵌字幕保留区域显示/隐藏
+function toggleSubtitleKeepSection() {
+  const checked = document.querySelector('.preset-category[value="subtitle_keep"]').checked;
+  const section = document.getElementById('subtitleKeepSection');
+  section.style.display = checked ? 'block' : 'none';
+  updatePresetPreview();
 }
 
 // 更新参数预览
