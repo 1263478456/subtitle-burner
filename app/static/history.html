@@ -74,6 +74,85 @@ tr:hover td { background: #f1f5f9; }
 .empty { text-align: center; padding: 60px; color: var(--dim); }
 .err-cell { color: var(--err); font-size: 11px; max-width: 200px; overflow: hidden;
             text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+/* 预览面板样式 */
+.preview-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 9998;
+}
+.preview-overlay.active {
+  display: block;
+}
+.preview-panel {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90vw;
+  height: 85vh;
+  z-index: 9999;
+  background: #0f0f0f;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  overflow: hidden;
+}
+.preview-panel.active {
+  display: flex;
+  flex-direction: column;
+}
+.preview-header {
+  background: #1a1a1a;
+  border-bottom: 1px solid #333;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.preview-header h2 {
+  font-size: 15px;
+  background: linear-gradient(135deg, var(--primary), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin: 0;
+}
+.preview-actions {
+  display: flex;
+  gap: 8px;
+}
+.preview-actions button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  font-size: 12px;
+}
+.preview-actions button:hover {
+  color: #fff;
+  border-color: var(--primary);
+}
+.preview-actions .btn-close {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.preview-actions .btn-close:hover {
+  background: #ef4444;
+  color: #fff;
+}
+.preview-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  height: 100%;
+}
 </style>
 </head>
 <body>
@@ -81,7 +160,7 @@ tr:hover td { background: #f1f5f9; }
   <h1>🔥 字幕烧录工具</h1>
   <nav>
     <a href="/">主控制台</a>
-    <a href="/preview">🎬 字幕预览</a>
+    <a href="javascript:void(0)" onclick="togglePreview()">🎬 字幕预览</a>
     <a class="active">历史记录</a>
     <a href="javascript:void(0)" onclick="showPendingQueueModal()">📋 待压制队列</a>
     <a href="javascript:void(0)" onclick="openAboutModal()">关于</a>
@@ -91,6 +170,20 @@ tr:hover td { background: #f1f5f9; }
     <button onclick="logout()">退出</button>
   </div>
 </header>
+
+<!-- 遮罩层 -->
+<div class="preview-overlay" id="previewOverlay" onclick="togglePreview()"></div>
+
+<!-- 预览面板 -->
+<div class="preview-panel" id="previewPanel">
+  <div class="preview-header">
+    <h2>🎬 字幕预览</h2>
+    <div class="preview-actions">
+      <button onclick="togglePreview()" class="btn-close">✕ 关闭预览</button>
+    </div>
+  </div>
+  <iframe class="preview-iframe" id="previewIframe" src="about:blank"></iframe>
+</div>
 
 <div class="container">
   <div class="stats">
@@ -305,6 +398,33 @@ async function loadAboutInfo() {
   } catch (error) {
     document.getElementById('aboutVersion').textContent = '获取失败';
     document.getElementById('aboutFFmpeg').textContent = '获取失败';
+  }
+}
+
+// 预览面板控制
+let previewLoaded = false;
+
+function togglePreview() {
+  const panel = document.getElementById('previewPanel');
+  const overlay = document.getElementById('previewOverlay');
+  const iframe = document.getElementById('previewIframe');
+
+  if (panel.classList.contains('active')) {
+    // 关闭预览
+    panel.classList.remove('active');
+    overlay.classList.remove('active');
+    iframe.src = 'about:blank';
+    previewLoaded = false;
+    document.body.style.overflow = '';
+  } else {
+    // 打开预览
+    panel.classList.add('active');
+    overlay.classList.add('active');
+    if (!previewLoaded) {
+      iframe.src = '/preview';
+      previewLoaded = true;
+    }
+    document.body.style.overflow = 'hidden';
   }
 }
 
