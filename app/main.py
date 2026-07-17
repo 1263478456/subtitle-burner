@@ -1468,7 +1468,7 @@ async def clear_history(user: str = Depends(require_auth)):
 @app.post("/api/retry-all-failed")
 async def retry_all_failed(user: str = Depends(require_auth)):
     """重试所有失败的任务"""
-    failed_tasks = db_query("SELECT task_id FROM tasks WHERE user=? AND status='failed'", (user,))
+    failed_tasks = db_query("SELECT * FROM tasks WHERE user=? AND status='failed'", (user,))
     if not failed_tasks:
         return {"message": "没有失败的任务", "count": 0}
     
@@ -1478,8 +1478,26 @@ async def retry_all_failed(user: str = Depends(require_auth)):
         now = datetime.now().isoformat()
         db_execute("UPDATE tasks SET status=?, progress=0, error=NULL, created_at=? WHERE task_id=?",
                    ("queued", now, task_id))
-        if task_id in tasks:
-            tasks[task_id].update({"status": "queued", "progress": 0, "error": None, "created_at": now})
+        
+        # 从数据库加载完整任务数据到内存
+        params = {}
+        if r["params"]:
+            try:
+                params = json.loads(r["params"])
+            except:
+                pass
+        
+        tasks[task_id] = {
+            "task_id": task_id,
+            "user": user,
+            "video_name": r["video_name"],
+            "subtitle_name": r["subtitle_name"] if "subtitle_name" in r.keys() else "",
+            "status": "queued",
+            "progress": 0,
+            "params": params,
+            "created_at": now,
+            "error": None
+        }
         await queue.put(task_id)
         count += 1
     return {"message": f"已重试 {count} 个任务", "count": count}
