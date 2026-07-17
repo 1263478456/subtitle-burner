@@ -1227,13 +1227,15 @@ async def burn_subtitle(user: str = Depends(require_auth),
                        keep_original_sub: bool = Form(False),
                        preview_params: str = Form(""),
                        remove_subtitle_indices: str = Form(""),
-                       remove_subtitle_mode: str = Form("")):
+                       remove_subtitle_mode: str = Form(""),
+                       sub_keep_mode: str = Form(""),
+                       sub_keep_languages: str = Form("")):
     video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
     if not video_files:
         raise HTTPException(404, "文件不存在")
     if task_id in tasks and tasks[task_id].get("status") in ("queued", "processing"):
         raise HTTPException(400, "任务已在队列中")
-    params = {"video_name": video_name, "duration": duration, "crf": crf, "preset": preset, "codec": codec, "style": style, "sub_mode": sub_mode, "keep_original_sub": keep_original_sub, "remove_subtitle_indices": remove_subtitle_indices, "remove_subtitle_mode": remove_subtitle_mode}
+    params = {"video_name": video_name, "duration": duration, "crf": crf, "preset": preset, "codec": codec, "style": style, "sub_mode": sub_mode, "keep_original_sub": keep_original_sub, "remove_subtitle_indices": remove_subtitle_indices, "remove_subtitle_mode": remove_subtitle_mode, "sub_keep_mode": sub_keep_mode, "sub_keep_languages": sub_keep_languages}
     
     # 解析预览参数
     if preview_params:
@@ -1464,6 +1466,8 @@ async def burn_from_media(
     preview_params: str = Form(""),
     remove_subtitle_indices: str = Form(""),
     remove_subtitle_mode: str = Form(""),
+    sub_keep_mode: str = Form(""),
+    sub_keep_languages: str = Form(""),
 ):
     """直接从媒体库添加烧录任务（不需要上传）"""
     logger.info(f"[媒体库烧录] 用户: {user}, codec: {codec}, crf: {crf}, preset: {preset}, sub_mode: {sub_mode}")
@@ -1501,6 +1505,8 @@ async def burn_from_media(
         "keep_original_sub": keep_original_sub,
         "remove_subtitle_indices": remove_subtitle_indices,
         "remove_subtitle_mode": remove_subtitle_mode,
+        "sub_keep_mode": sub_keep_mode,
+        "sub_keep_languages": sub_keep_languages,
     }
     
     # 解析预览参数
@@ -1597,6 +1603,10 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     remove_subtitle_indices = params.get("remove_subtitle_indices", "")  # 要保留的轨道索引，逗号分隔
     remove_subtitle_mode = params.get("remove_subtitle_mode", "")  # "all" 表示删除所有
     
+    # 按语言匹配的字幕保留参数
+    sub_keep_mode = params.get("sub_keep_mode", "")  # "all_except"=保留指定语言, "delete_selected"=删除指定语言
+    sub_keep_languages = params.get("sub_keep_languages", "")  # 语言代码列表，逗号分隔如 "chi,eng"
+    
     # 预览参数
     preview_params = params.get("preview_params", {})
     time_offset = preview_params.get("timeOffset", 0)
@@ -1670,15 +1680,46 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     if remove_subtitle_mode == "all":
         # 删除所有内嵌字幕
         sub_args = ["-sn"]
+    elif sub_keep_languages and sub_keep_mode:
+        # 按语言匹配：探测视频字幕轨道，按语言过滤
+        try:
+            probe_cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(video_path)]
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+            if probe_result.returncode == 0:
+                probe_info = json.loads(probe_result.stdout)
+                keep_langs = set(l.strip().lower() for l in sub_keep_languages.split(",") if l.strip())
+                # 找出所有字幕轨道及其语言
+                sub_streams = []
+                for s in probe_info.get("streams", []):
+                    if s.get("codec_type") == "subtitle":
+                        lang = (s.get("tags", {}).get("language", "") or "").lower()
+                        sub_streams.append({"index": s["index"], "language": lang})
+                
+                if sub_streams:
+                    if sub_keep_mode == "all_except":
+                        # 保留指定语言的字幕，删除其他
+                        keep_indices = [str(s["index"]) for s in sub_streams if s["language"] in keep_langs]
+                    else:
+                        # 删除指定语言的字幕，保留其他
+                        keep_indices = [str(s["index"]) for s in sub_streams if s["language"] not in keep_langs]
+                    
+                    if not keep_indices:
+                        # 没有匹配的字幕轨道，删除所有
+                        sub_args = ["-sn"]
+                    elif len(keep_indices) < len(sub_streams):
+                        # 有需要删除的字幕，使用选择性映射
+                        # 先映射所有字幕，再排除不需要的
+                        sub_args = ["-map", "0:s?"]
+                        for s in sub_streams:
+                            if str(s["index"]) not in keep_indices:
+                                sub_args.extend(["-map", f"-0:{s['index']}"])
+                    # 如果所有字幕都要保留，不需要额外参数
+        except Exception as e:
+            logger.warning(f"[FFmpeg] 字幕语言探测失败: {e}，保留所有字幕")
     elif remove_subtitle_indices:
-        # 选择性删除：先映射所有字幕，再排除要删除的
+        # 按索引选择性删除（旧方式）
         keep_set = set(remove_subtitle_indices.split(",")) if remove_subtitle_indices else set()
-        # 映射所有字幕轨道
         sub_args = ["-map", "0:s?"]
-        # 排除不在保留列表中的字幕轨道（通过探测确定具体索引）
-        # 这里使用 -map -0:s:N 的方式排除
-        # 注意：需要先探测字幕轨道才能知道哪些要排除
-        # 简化方案：直接使用 keep_original_sub 控制，删除逻辑在后端处理
     
     if codec == "h264_nvenc":
         return [

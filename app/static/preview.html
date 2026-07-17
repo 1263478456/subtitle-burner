@@ -695,9 +695,29 @@ input[type="range"]::-webkit-slider-thumb {
             <input type="checkbox" class="preset-category" value="time_offset" checked style="width:14px; height:14px;">
             时间偏移
           </label>
+          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
+            <input type="checkbox" class="preset-category" value="subtitle_keep" checked style="width:14px; height:14px;">
+            内嵌字幕保留
+          </label>
         </div>
       </div>
-      <div style="background:#222; border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px; color:#999;">
+      <div id="subtitleKeepSection" style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:12px;">
+        <div style="color:#10b981; font-size:12px; font-weight:500; margin-bottom:8px;">🎬 内嵌字幕处理（按语言匹配）</div>
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
+            <input type="radio" name="subKeepMode" value="all_except" checked onchange="toggleSubKeepMode()"> 保留指定语言，删除其他
+          </label>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
+            <input type="radio" name="subKeepMode" value="delete_selected" onchange="toggleSubKeepMode()"> 删除指定语言，保留其他
+          </label>
+        </div>
+        <div style="font-size:11px; color:#999; margin-bottom:6px;">
+          输入要保留/删除的语言代码（逗号分隔）：<br>
+          <span style="color:#10b981;">常用：chi=中文, eng=英文, jpn=日文, kor=韩文, fre=法文, ger=德文, spa=西文</span>
+        </div>
+        <input type="text" id="subKeepLanguages" placeholder="例如: chi,eng" style="width:100%; padding:6px 10px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
+      </div>
+      <div style="background:#222; border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px; color:#999; max-height:200px; overflow-y:auto;">
         <div style="margin-bottom:8px; color:#e5e5e5; font-weight:500;">当前参数预览：</div>
         <div id="presetPreview" style="line-height:1.8;"></div>
       </div>
@@ -2123,6 +2143,17 @@ async function executeRemoveSubtitles() {
   showToast(`已标记删除 ${removeLabel}，将在压制时生效`, 'success');
   closeRemoveSubtitlesModal();
   
+  // 保存字幕语言设置到 localStorage（供预设使用）
+  const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
+  const subKeepLanguages = document.getElementById('subKeepLanguages')?.value?.trim() || '';
+  if (mode === 'select' && subKeepLanguages) {
+    localStorage.setItem('subKeepMode', subKeepMode);
+    localStorage.setItem('subKeepLanguages', subKeepLanguages);
+  } else {
+    localStorage.removeItem('subKeepMode');
+    localStorage.removeItem('subKeepLanguages');
+  }
+  
   // 更新按钮显示
   updateRemoveSubtitlesButton();
 }
@@ -2165,6 +2196,9 @@ function clearRemoveSubtitles() {
   state.removeSubtitleCount = 0;
   localStorage.removeItem('removeSubtitleIndices');
   localStorage.removeItem('removeSubtitleCount');
+  localStorage.removeItem('removeSubtitleMode');
+  localStorage.removeItem('subKeepMode');
+  localStorage.removeItem('subKeepLanguages');
   updateRemoveSubtitlesButton();
   showToast('已取消删除字幕标记', 'success');
 }
@@ -2506,6 +2540,20 @@ async function loadPreset(presetId) {
     if (params.burnCrf) document.getElementById('burnCrf').value = params.burnCrf;
     if (params.burnPreset) document.getElementById('burnPreset').value = params.burnPreset;
     
+    // 应用字幕语言保留设置（如果预设中包含）
+    if (params.subKeepMode) {
+      const radio = document.querySelector(`input[name="subKeepMode"][value="${params.subKeepMode}"]`);
+      if (radio) radio.checked = true;
+    }
+    if (params.subKeepLanguages !== undefined) {
+      document.getElementById('subKeepLanguages').value = params.subKeepLanguages;
+      // 保存到 state 供压制时使用
+      state.subKeepMode = params.subKeepMode || 'all_except';
+      state.subKeepLanguages = params.subKeepLanguages || '';
+      localStorage.setItem('subKeepMode', state.subKeepMode);
+      localStorage.setItem('subKeepLanguages', state.subKeepLanguages);
+    }
+    
     // 保存压制设置到 localStorage
     loadBurnSettingsFromUI();
     
@@ -2533,8 +2581,15 @@ function closeSavePresetDialog() {
   document.getElementById('presetName').value = '';
   document.getElementById('presetDescription').value = '';
   document.getElementById('presetIsDefault').checked = false;
+  document.getElementById('subKeepLanguages').value = '';
   // 恢复分类勾选
   document.querySelectorAll('.preset-category').forEach(cb => cb.checked = true);
+  document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
+}
+
+// 切换字幕保留模式
+function toggleSubKeepMode() {
+  // 只需要切换时更新预览即可
 }
 
 // 更新参数预览
@@ -2560,6 +2615,12 @@ function updatePresetPreview() {
   };
   const modeMap = { 'burn': '硬字幕', 'soft': '软字幕' };
   
+  // 字幕语言保留设置
+  const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
+  const subKeepLangs = document.getElementById('subKeepLanguages').value.trim();
+  const subKeepLabel = subKeepMode === 'all_except' ? '保留指定语言' : '删除指定语言';
+  const subKeepDisplay = subKeepLangs ? `${subKeepLabel}: ${subKeepLangs}` : '未设置（保留所有）';
+  
   // 压制选项预览
   const burnPreview = `
     <div style="margin-top:6px; padding-top:6px; border-top:1px solid #333;">
@@ -2575,6 +2636,9 @@ function updatePresetPreview() {
     <div>🎨 颜色: <span style="color:${p.fontColor}">${p.fontColor}</span></div>
     <div>✨ 描边: ${p.outlineWidth}px | 阴影: ${p.shadowOffset}px | 背景: ${p.bgOpacity}%</div>
     ${burnPreview}
+    <div style="margin-top:6px; padding-top:6px; border-top:1px solid #333;">
+      <div>🎬 内嵌字幕: ${subKeepDisplay}</div>
+    </div>
   `;
 }
 
@@ -2618,6 +2682,11 @@ async function savePreset() {
   
   if (categories.includes('time_offset')) {
     params.timeOffset = state.params.timeOffset;
+  }
+  
+  if (categories.includes('subtitle_keep')) {
+    params.subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
+    params.subKeepLanguages = document.getElementById('subKeepLanguages').value.trim();
   }
   
   if (categories.length === 0) {
@@ -2965,6 +3034,9 @@ async function startBatchBurn() {
       // 传递延迟删除字幕参数
       fd.append('remove_subtitle_indices', localStorage.getItem('removeSubtitleIndices') || '');
       fd.append('remove_subtitle_mode', localStorage.getItem('removeSubtitleMode') || '');
+      // 传递按语言匹配的字幕保留参数
+      fd.append('sub_keep_mode', localStorage.getItem('subKeepMode') || '');
+      fd.append('sub_keep_languages', localStorage.getItem('subKeepLanguages') || '');
       
       const response = await fetch('/api/media/burn', {
         method: 'POST',

@@ -646,6 +646,9 @@ async function startBatchBurnFromQueue() {
       // 传递延迟删除字幕参数
       fd.append('remove_subtitle_indices', localStorage.getItem('removeSubtitleIndices') || '');
       fd.append('remove_subtitle_mode', localStorage.getItem('removeSubtitleMode') || '');
+      // 传递按语言匹配的字幕保留参数
+      fd.append('sub_keep_mode', localStorage.getItem('subKeepMode') || '');
+      fd.append('sub_keep_languages', localStorage.getItem('subKeepLanguages') || '');
       
       const response = await fetch('/api/media/burn', { method: 'POST', body: fd });
       
