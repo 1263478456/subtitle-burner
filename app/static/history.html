@@ -315,16 +315,16 @@ const retryAllFailed = async () => {
     alert('没有失败的任务');
     return;
   }
-  if (!confirm(`确定要重试所有 ${failedCount} 个失败的任务吗？`)) return;
+  if (!confirm(`确定要重试所有 ${failedCount} 个失败的任务吗？\n\n重试后这些任务会进入"队列中"状态。`)) return;
 
   try {
     const r = await fetch('/api/retry-all-failed', { method: 'POST' });
     const data = await r.json();
     if (r.ok) {
-      alert(data.message);
-      currentStatus = '';  // 切回全部视图
-      filterByStatus('');
+      alert(`✅ ${data.message}\n\n点击"队列中"查看排队的任务`);
+      // 保持在失败视图，刷新显示（应该变成 0 个）
       loadStats();
+      loadPage();
     } else {
       alert(data.detail || '重试失败');
     }
@@ -339,13 +339,14 @@ const deleteCompleted = async () => {
     alert('没有已完成的任务');
     return;
   }
-  if (!confirm(`确定要删除所有 ${completedCount} 个已完成的任务吗？此操作不可恢复！`)) return;
+  if (!confirm(`确定要删除所有 ${completedCount} 个已完成的任务吗？\n\n⚠️ 此操作不可恢复！将删除任务记录和输出文件！`)) return;
 
   try {
     const r = await fetch('/api/delete-completed', { method: 'POST' });
     const data = await r.json();
     if (r.ok) {
-      alert(data.message);
+      alert(`✅ ${data.message}`);
+      // 保持在已完成视图，刷新显示（应该变成 0 个）
       loadStats();
       loadPage();
     } else {
