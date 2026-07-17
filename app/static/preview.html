@@ -710,13 +710,13 @@ input[type="range"]::-webkit-slider-thumb {
         <div style="color:#10b981; font-size:12px; font-weight:500; margin-bottom:8px;">🎬 内嵌字幕处理</div>
         <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
-            <input type="radio" name="subKeepMode" value="all_except" checked onchange="toggleSubKeepMode()"> 保留指定语言，删除其他
+            <input type="radio" name="subKeepMode" value="all_except" checked onchange="toggleSubKeepMode(); updatePresetPreview();"> 保留指定语言，删除其他
           </label>
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
-            <input type="radio" name="subKeepMode" value="delete_selected" onchange="toggleSubKeepMode()"> 删除指定语言，保留其他
+            <input type="radio" name="subKeepMode" value="delete_selected" onchange="toggleSubKeepMode(); updatePresetPreview();"> 删除指定语言，保留其他
           </label>
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
-            <input type="radio" name="subKeepMode" value="delete_all" onchange="toggleSubKeepMode()"> 删除全部内嵌字幕
+            <input type="radio" name="subKeepMode" value="delete_all" onchange="toggleSubKeepMode(); updatePresetPreview();"> 删除全部内嵌字幕
           </label>
         </div>
         <div id="subKeepLangSection">
@@ -724,7 +724,7 @@ input[type="range"]::-webkit-slider-thumb {
             输入要保留/删除的语言代码（逗号分隔）：<br>
             <span style="color:#10b981;">常用：chi=中文, eng=英文, jpn=日文, kor=韩文, fre=法文, ger=德文, spa=西文</span>
           </div>
-          <input type="text" id="subKeepLanguages" placeholder="例如: chi,eng" style="width:100%; padding:6px 10px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
+          <input type="text" id="subKeepLanguages" placeholder="例如: chi,eng" oninput="updatePresetPreview()" style="width:100%; padding:6px 10px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
         </div>
       </div>
       <div style="background:#222; border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px; color:#999; max-height:200px; overflow-y:auto;">
@@ -2681,14 +2681,24 @@ function updatePresetPreview() {
   };
   const modeMap = { 'burn': '硬字幕', 'soft': '软字幕' };
   
-  // 字幕语言保留设置 — 从 localStorage 读取真实状态
-  const removeMode = localStorage.getItem('removeSubtitleMode') || '';
-  const subKeepModeVal = localStorage.getItem('subKeepMode') || 'all_except';
-  const subKeepLangs = localStorage.getItem('subKeepLanguages') || '';
+  // 字幕语言保留设置 — 弹窗打开时从 UI 读取，否则从 localStorage 读取
+  const dialogOpen = document.getElementById('savePresetModal').classList.contains('active');
+  let removeMode, subKeepModeVal, subKeepLangs;
+  if (dialogOpen) {
+    // 弹窗已打开，从 UI 元素读取实时状态
+    subKeepModeVal = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
+    subKeepLangs = document.getElementById('subKeepLanguages')?.value?.trim() || '';
+    removeMode = subKeepModeVal === 'delete_all' ? 'all' : (subKeepLangs ? 'language' : '');
+  } else {
+    // 弹窗未打开，从 localStorage 读取
+    removeMode = localStorage.getItem('removeSubtitleMode') || '';
+    subKeepModeVal = localStorage.getItem('subKeepMode') || 'all_except';
+    subKeepLangs = localStorage.getItem('subKeepLanguages') || '';
+  }
   let subKeepDisplay;
-  if (removeMode === 'all') {
+  if (removeMode === 'all' || subKeepModeVal === 'delete_all') {
     subKeepDisplay = '删除全部内嵌字幕';
-  } else if (removeMode === 'language' && subKeepLangs) {
+  } else if ((removeMode === 'language' || subKeepLangs) && subKeepLangs) {
     const modeLabel = subKeepModeVal === 'all_except' ? '保留指定语言' : '删除指定语言';
     subKeepDisplay = `${modeLabel}: ${subKeepLangs}`;
   } else {
