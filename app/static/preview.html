@@ -18,7 +18,7 @@ body {
   display: flex; flex-direction: column; height: 100vh;
   overflow: hidden;
 }
-body.embedded { height: 100%; overflow: hidden; }
+body.embedded { height: 100vh; overflow: hidden; }
 
 /* Header */
 header { 
@@ -208,6 +208,7 @@ input[type="range"]::-webkit-slider-thumb {
   padding: 8px 12px; background: #111; border-bottom: 1px solid var(--border);
   font-size: 11px; color: var(--muted);
   display: flex; gap: 16px;
+  flex-shrink: 0;
 }
 .file-info span { display: flex; align-items: center; gap: 4px; }
 .file-info .name { color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
