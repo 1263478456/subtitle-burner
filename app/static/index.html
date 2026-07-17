@@ -819,7 +819,14 @@ async function applyPresetToForm(presetId) {
   }
 }
 
+// 存储冲突对话框的预设参数
+let _conflictPreset = null;
+let _conflictParams = null;
+
 function showPresetConflictDialog(preset, params, conflicts) {
+  _conflictPreset = preset;
+  _conflictParams = params;
+  
   const overlay = document.createElement('div');
   overlay.id = 'presetConflictOverlay';
   overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center;';
@@ -838,10 +845,10 @@ function showPresetConflictDialog(preset, params, conflicts) {
           <span style="font-size:12px;color:#999;">${conflictList}</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;">
-          <button onclick="closePresetConflict(); applyPresetValues(${JSON.stringify(params).replace(/"/g, '&quot;')}); showPresetInfo('${preset.name}', ${JSON.stringify(params).replace(/"/g, '&quot;')});" style="width:100%;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">
+          <button onclick="usePresetValues()" style="width:100%;padding:10px;background:#3b82f6;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">
             🔄 使用预设值（覆盖当前设置）
           </button>
-          <button onclick="closePresetConflict(); showPresetInfo('${preset.name}', ${JSON.stringify(params).replace(/"/g, '&quot;')});" style="width:100%;padding:10px;background:#333;color:#ccc;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:13px;">
+          <button onclick="keepCurrentValues()" style="width:100%;padding:10px;background:#333;color:#ccc;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:13px;">
             📋 保留当前值（仅记录预设）
           </button>
         </div>
@@ -849,6 +856,21 @@ function showPresetConflictDialog(preset, params, conflicts) {
     </div>
   `;
   document.body.appendChild(overlay);
+}
+
+function usePresetValues() {
+  closePresetConflict();
+  if (_conflictParams) applyPresetValues(_conflictParams);
+  if (_conflictPreset) showPresetInfo(_conflictPreset.name, _conflictParams || {});
+  _conflictPreset = null;
+  _conflictParams = null;
+}
+
+function keepCurrentValues() {
+  closePresetConflict();
+  if (_conflictPreset) showPresetInfo(_conflictPreset.name, _conflictParams || {});
+  _conflictPreset = null;
+  _conflictParams = null;
 }
 
 function closePresetConflict() {
