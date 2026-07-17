@@ -2570,16 +2570,29 @@ async function loadPreset(presetId) {
     if (params.burnPreset) document.getElementById('burnPreset').value = params.burnPreset;
     
     // 应用字幕语言保留设置（如果预设中包含）
-    if (params.subKeepMode) {
-      const radio = document.querySelector(`input[name="subKeepMode"][value="${params.subKeepMode}"]`);
-      if (radio) radio.checked = true;
-    }
-    if (params.subKeepLanguages !== undefined) {
-      document.getElementById('subKeepLanguages').value = params.subKeepLanguages;
-      // 保存到 state 和 localStorage 供压制时使用
+    if (params.subKeepMode || params.subKeepLanguages !== undefined) {
+      // 设置单选按钮
+      if (params.subKeepMode) {
+        const radio = document.querySelector(`input[name="subKeepMode"][value="${params.subKeepMode}"]`);
+        if (radio) radio.checked = true;
+      }
+      // 设置语言输入框
+      if (params.subKeepLanguages !== undefined) {
+        document.getElementById('subKeepLanguages').value = params.subKeepLanguages;
+      }
+      // 保存到 state 和 localStorage
       state.subKeepMode = params.subKeepMode || 'all_except';
       state.subKeepLanguages = params.subKeepLanguages || '';
-      state.removeSubtitleMode = params.subKeepLanguages ? 'language' : '';
+      
+      // 根据模式设置 removeSubtitleMode
+      if (params.subKeepMode === 'delete_all') {
+        state.removeSubtitleMode = 'all';
+      } else if (params.subKeepLanguages) {
+        state.removeSubtitleMode = 'language';
+      } else {
+        state.removeSubtitleMode = '';
+      }
+      
       localStorage.setItem('subKeepMode', state.subKeepMode);
       localStorage.setItem('subKeepLanguages', state.subKeepLanguages);
       localStorage.setItem('removeSubtitleMode', state.removeSubtitleMode);
