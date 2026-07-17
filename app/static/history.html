@@ -78,7 +78,9 @@ tr:hover td { background: #f1f5f9; }
   <h1>🔥 字幕烧录工具</h1>
   <nav>
     <a href="/">主控制台</a>
+    <a href="/preview">字幕预览</a>
     <a class="active">历史记录</a>
+    <a href="javascript:void(0)" onclick="openAboutModal()">关于</a>
   </nav>
   <div class="user">
     <span id="userName"></span>
@@ -217,6 +219,31 @@ $('#search').addEventListener('input', (e) => {
   searchTimer = setTimeout(() => { page = 1; loadPage(); }, 300);
 });
 
+// 关于弹窗
+function openAboutModal() {
+  document.getElementById('aboutModal').style.display = 'flex';
+  loadAboutInfo();
+}
+
+function closeAboutModal() {
+  document.getElementById('aboutModal').style.display = 'none';
+}
+
+async function loadAboutInfo() {
+  try {
+    const response = await fetch('/api/health');
+    if (response.ok) {
+      const data = await response.json();
+      document.getElementById('aboutVersion').textContent = 'v' + (data.version || '未知');
+      document.getElementById('aboutFFmpeg').textContent = data.ffmpeg ? '✓ 已安装' : '✗ 未安装';
+      document.getElementById('aboutFFmpeg').style.color = data.ffmpeg ? '#10b981' : '#ef4444';
+    }
+  } catch (error) {
+    document.getElementById('aboutVersion').textContent = '获取失败';
+    document.getElementById('aboutFFmpeg').textContent = '获取失败';
+  }
+}
+
 (async () => {
   const r = await fetch('/api/me');
   if (!r.ok) { location.href = '/login'; return; }
@@ -225,5 +252,39 @@ $('#search').addEventListener('input', (e) => {
   setInterval(() => { loadStats(); if (document.querySelector('.status.processing,.status.queued')) loadPage(); }, 5000);
 })();
 </script>
+
+<!-- 关于弹窗 -->
+<div id="aboutModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10000; align-items:center; justify-content:center;" onclick="if(event.target===this)closeAboutModal()">
+  <div style="background:#fff; border-radius:12px; width:450px; max-height:80vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div style="padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:16px; margin:0;">🎬 字幕烧录工具</h3>
+      <button onclick="closeAboutModal()" style="background:none; border:none; cursor:pointer; font-size:18px; color:#999;">✕</button>
+    </div>
+    <div style="padding:20px;">
+      <div style="text-align:center; margin-bottom:20px;">
+        <div style="font-size:48px; margin-bottom:12px;">🎬</div>
+        <div style="font-size:20px; font-weight:600; color:#1e293b;">字幕烧录工具</div>
+        <div style="font-size:14px; color:#64748b; margin-top:4px;">Subtitle Burner</div>
+      </div>
+      <div style="background:#f8fafc; border-radius:8px; padding:16px; margin-bottom:16px; border:1px solid #e2e8f0;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+          <span style="color:#64748b; font-size:13px;">版本号</span>
+          <span id="aboutVersion" style="color:#1e293b; font-size:13px; font-family:monospace;">加载中...</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+          <span style="color:#64748b; font-size:13px;">运行状态</span>
+          <span style="color:#10b981; font-size:13px;">● 运行中</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span style="color:#64748b; font-size:13px;">FFmpeg</span>
+          <span id="aboutFFmpeg" style="color:#1e293b; font-size:13px;">检测中...</span>
+        </div>
+      </div>
+      <div style="text-align:center; color:#94a3b8; font-size:11px;">
+        基于 FFmpeg + libass 构建 · 支持 GPU 加速
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
