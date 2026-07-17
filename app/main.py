@@ -1475,6 +1475,16 @@ async def delete_history(task_id: str, user: str = Depends(require_auth)):
     owned = db_query("SELECT task_id FROM tasks WHERE task_id=? AND user=?", (task_id, user))
     if not owned:
         raise HTTPException(404, "任务不存在或无权访问")
+    # 停止正在运行的 FFmpeg 进程
+    if task_id in running_processes:
+        process = running_processes[task_id]
+        try:
+            process.terminate()
+            logger.info(f"[删除任务] 已停止任务 {task_id} 的 FFmpeg 进程")
+        except Exception as e:
+            logger.error(f"[删除任务] 停止任务 {task_id} 失败: {e}")
+        running_processes.pop(task_id, None)
+    # 清理文件
     for f in INPUT_DIR.glob(f"{task_id}_*"):
         try: f.unlink()
         except: pass
@@ -1491,12 +1501,25 @@ async def clear_history(user: str = Depends(require_auth)):
     rows = db_query("SELECT task_id FROM tasks WHERE user=?", (user,))
     for r in rows:
         tid = r["task_id"]
+        # 停止正在运行的 FFmpeg 进程
+        if tid in running_processes:
+            process = running_processes[tid]
+            try:
+                process.terminate()
+                logger.info(f"[清空任务] 已停止任务 {tid} 的 FFmpeg 进程")
+            except Exception as e:
+                logger.error(f"[清空任务] 停止任务 {tid} 失败: {e}")
+            running_processes.pop(tid, None)
+        # 清理文件
         for f in INPUT_DIR.glob(f"{tid}_*"):
             try: f.unlink()
             except: pass
         for f in OUTPUT_DIR.glob(f"{tid}_*"):
             try: f.unlink()
             except: pass
+        # 从内存中移除
+        if tid in tasks:
+            del tasks[tid]
     db_execute("DELETE FROM tasks WHERE user=?", (user,))
     return {"message": "已清空"}
 
