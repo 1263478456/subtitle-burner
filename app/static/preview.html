@@ -660,12 +660,12 @@ input[type="range"]::-webkit-slider-thumb {
 
 <!-- 保存预设弹窗 -->
 <div class="modal-overlay" id="savePresetModal">
-  <div class="modal" style="width:450px;">
-    <div class="modal-header">
+  <div class="modal" style="width:450px; max-height:80vh; display:flex; flex-direction:column;">
+    <div class="modal-header" style="flex-shrink:0;">
       <h3>💾 保存字幕预设</h3>
       <button class="modal-close" onclick="closeSavePresetDialog()">✕</button>
     </div>
-    <div style="padding:20px;">
+    <div style="padding:20px; overflow-y:auto; flex:1; min-height:0;">
       <div class="form-group" style="margin-bottom:16px;">
         <label style="display:block; margin-bottom:6px; color:#e5e5e5; font-size:13px;">预设名称 *</label>
         <input type="text" id="presetName" placeholder="例如：电视剧标准、电影大字幕" style="width:100%; padding:10px; background:#222; border:1px solid #444; border-radius:6px; color:#e5e5e5; font-size:13px;">
@@ -721,10 +721,10 @@ input[type="range"]::-webkit-slider-thumb {
         <div style="margin-bottom:8px; color:#e5e5e5; font-weight:500;">当前参数预览：</div>
         <div id="presetPreview" style="line-height:1.8;"></div>
       </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn btn-ghost btn-sm" onclick="closeSavePresetDialog()">取消</button>
-        <button class="btn btn-primary btn-sm" onclick="savePreset()">💾 保存</button>
-      </div>
+    </div>
+    <div class="modal-footer" style="flex-shrink:0; border-top:1px solid #333; padding:12px 20px; display:flex; gap:8px; justify-content:flex-end;">
+      <button class="btn btn-ghost btn-sm" onclick="closeSavePresetDialog()">取消</button>
+      <button class="btn btn-primary btn-sm" onclick="savePreset()">💾 保存</button>
     </div>
   </div>
 </div>
