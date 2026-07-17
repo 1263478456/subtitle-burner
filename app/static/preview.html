@@ -18,7 +18,7 @@ body {
   display: flex; flex-direction: column; height: 100vh;
   overflow: hidden;
 }
-body.embedded { height: auto; min-height: auto; }
+body.embedded { height: 100%; overflow: hidden; }
 
 /* Header */
 header { 
@@ -54,7 +54,7 @@ header h1 {
   flex: 1; display: flex; gap: 0; overflow: clip;
   min-height: 0;
 }
-body.embedded .main-container { min-height: 500px; }
+body.embedded .main-container { min-height: 0; }
 
 /* Video Section */
 .video-section { 
