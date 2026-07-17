@@ -1072,15 +1072,39 @@ function detectSubtitleType(filename) {
 function parseSubtitle() {
   console.log('[subtitle] === 开始解析字幕 ===');
   console.log('[subtitle] 类型:', state.subtitleType);
-  console.log('[subtitle] 内容长度:', state.subtitleContent?.length || 0);
+  console.log('[subtitle] 原始内容长度:', state.subtitleContent?.length || 0);
   
   if (!state.subtitleContent) {
     console.error('[subtitle] 错误: 字幕内容为空');
     return;
   }
   
+  // 检测并处理 BOM（字节顺序标记）
+  let content = state.subtitleContent;
+  
+  // UTF-16 LE BOM: ÿþ (0xFF 0xFE)
+  if (content.charCodeAt(0) === 0xFF && content.charCodeAt(1) === 0xFE) {
+    console.log('[subtitle] 检测到 UTF-16 LE BOM，尝试转换...');
+    content = convertUTF16ToUTF8(content);
+  }
+  // UTF-16 BE BOM: þÿ (0xFE 0xFF)
+  else if (content.charCodeAt(0) === 0xFE && content.charCodeAt(1) === 0xFF) {
+    console.log('[subtitle] 检测到 UTF-16 BE BOM，尝试转换...');
+    content = convertUTF16ToUTF8(content, true);
+  }
+  // UTF-8 BOM: ï»¿ (0xEF 0xBB 0xBF)
+  else if (content.charCodeAt(0) === 0xEF && content.charCodeAt(1) === 0xBB && content.charCodeAt(2) === 0xBF) {
+    console.log('[subtitle] 检测到 UTF-8 BOM，移除...');
+    content = content.substring(1);
+  }
+  
+  // 移除其他不可见控制字符（保留换行和空格）
+  content = content.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+  
+  state.subtitleContent = content;
+  
   // 输出前500字符用于调试
-  console.log('[subtitle] 内容预览:', state.subtitleContent.substring(0, 500));
+  console.log('[subtitle] 处理后内容预览:', content.substring(0, 500));
   
   state.parsedSubtitles = [];
   
@@ -1100,6 +1124,26 @@ function parseSubtitle() {
   } else {
     console.warn('[subtitle] 警告: 没有解析到任何字幕!');
   }
+}
+
+// 转换 UTF-16 到 UTF-8
+function convertUTF16ToUTF8(str, isBigEndian = false) {
+  const result = [];
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code === 0 && i < 2) continue; // 跳过 BOM
+    if (code < 128) {
+      result.push(String.fromCharCode(code));
+    } else if (code < 2048) {
+      result.push(String.fromCharCode((code >> 6) | 192));
+      result.push(String.fromCharCode((code & 63) | 128));
+    } else {
+      result.push(String.fromCharCode((code >> 12) | 224));
+      result.push(String.fromCharCode(((code >> 6) & 63) | 128));
+      result.push(String.fromCharCode((code & 63) | 128));
+    }
+  }
+  return result.join('');
 }
 
 // 解析 SRT

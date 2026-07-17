@@ -303,14 +303,14 @@ class NoCacheFileResponse(_FR):
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)
 async def container_health():
-    return {"status": "ok", "version": "3.0.88"}
+    return {"status": "ok", "version": "3.0.89"}
 
 @app.get("/api/health")
 async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.0.88",
+        "version": "3.0.89",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
@@ -358,14 +358,44 @@ async def get_media_file(path: str, request: Request):
     if full_path.suffix.lower() not in subtitle_exts:
         raise HTTPException(400, "不是字幕文件")
     
-    # 读取文件内容
+    # 读取文件内容（支持多种编码）
     try:
-        content = full_path.read_text(encoding='utf-8')
-    except UnicodeDecodeError:
-        try:
-            content = full_path.read_text(encoding='gbk')
-        except:
-            content = full_path.read_text(encoding='latin-1')
+        # 先读取原始字节，检测编码
+        raw_bytes = full_path.read_bytes()
+        
+        # 检测 BOM（字节顺序标记）
+        if raw_bytes[:2] == b'\xff\xfe':
+            # UTF-16 LE BOM
+            content = raw_bytes.decode('utf-16-le')
+            # 移除 BOM 字符
+            if content and content[0] == '\ufeff':
+                content = content[1:]
+            logger.info(f"[字幕] 检测到 UTF-16 LE 编码: {full_path.name}")
+        elif raw_bytes[:2] == b'\xfe\xff':
+            # UTF-16 BE BOM
+            content = raw_bytes.decode('utf-16-be')
+            if content and content[0] == '\ufeff':
+                content = content[1:]
+            logger.info(f"[字幕] 检测到 UTF-16 BE 编码: {full_path.name}")
+        elif raw_bytes[:3] == b'\xef\xbb\xbf':
+            # UTF-8 BOM
+            content = raw_bytes[3:].decode('utf-8')
+            logger.info(f"[字幕] 检测到 UTF-8 BOM: {full_path.name}")
+        else:
+            # 没有 BOM，尝试多种编码
+            for encoding in ['utf-8', 'gbk', 'gb2312', 'big5', 'latin-1']:
+                try:
+                    content = raw_bytes.decode(encoding)
+                    logger.info(f"[字幕] 使用 {encoding} 编码: {full_path.name}")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                content = raw_bytes.decode('latin-1')
+                logger.info(f"[字幕] 回退到 latin-1 编码: {full_path.name}")
+    except Exception as e:
+        logger.error(f"[字幕] 读取文件失败: {e}")
+        raise HTTPException(500, f"读取文件失败: {str(e)}")
     
     return {"content": content, "filename": full_path.name, "type": full_path.suffix.lower()}
 
