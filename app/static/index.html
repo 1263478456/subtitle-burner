@@ -150,15 +150,32 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
               border: 1px dashed var(--border); }
 
 /* 预览面板样式 */
-.preview-panel {
+.preview-overlay {
   display: none;
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 9998;
+}
+.preview-overlay.active {
+  display: block;
+}
+.preview-panel {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90vw;
+  height: 85vh;
   z-index: 9999;
   background: #0f0f0f;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  overflow: hidden;
 }
 .preview-panel.active {
   display: flex;
@@ -285,6 +302,9 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
     </div>
   </div>
 </div>
+
+<!-- 遮罩层 -->
+<div class="preview-overlay" id="previewOverlay" onclick="togglePreview()"></div>
 
 <!-- 预览面板 -->
 <div class="preview-panel" id="previewPanel">
@@ -486,17 +506,20 @@ let previewLoaded = false;
 
 function togglePreview() {
   const panel = document.getElementById('previewPanel');
+  const overlay = document.getElementById('previewOverlay');
   const iframe = document.getElementById('previewIframe');
   
   if (panel.classList.contains('active')) {
     // 关闭预览
     panel.classList.remove('active');
+    overlay.classList.remove('active');
     iframe.src = 'about:blank';
     previewLoaded = false;
     document.body.style.overflow = '';
   } else {
     // 打开预览
     panel.classList.add('active');
+    overlay.classList.add('active');
     if (!previewLoaded) {
       iframe.src = '/preview';
       previewLoaded = true;
