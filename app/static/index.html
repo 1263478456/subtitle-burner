@@ -220,6 +220,7 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
     <a class="active">主控制台</a>
     <button onclick="togglePreview()">🎬 字幕预览</button>
     <a href="/history">历史记录</a>
+    <button onclick="showPendingQueueModal()">📋 待压制队列</button>
     <button onclick="openAboutModal()">关于</button>
   </nav>
   <div class="user">
@@ -294,6 +295,28 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
     </div>
   </div>
   <iframe class="preview-iframe" id="previewIframe" src="about:blank"></iframe>
+</div>
+
+<!-- 待压制队列弹窗 -->
+<div id="pendingQueueModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:10001; align-items:center; justify-content:center;" onclick="if(event.target===this)closePendingQueueModal()">
+  <div style="background:#fff; border-radius:12px; width:700px; max-height:80vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+    <div style="padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="font-size:16px; margin:0;">📋 待压制队列</h3>
+      <button onclick="closePendingQueueModal()" style="background:none; border:none; cursor:pointer; font-size:18px; color:#999;">✕</button>
+    </div>
+    <div style="padding:20px;">
+      <div id="pendingQueueList" style="margin-bottom:16px;">
+        <div style="text-align:center; padding:40px; color:#94a3b8;">队列为空</div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid #e2e8f0;">
+        <span style="font-size:13px; color:#64748b;">共 <span id="pendingQueueCount">0</span> 个任务</span>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" style="font-size:12px; padding:6px 12px;" onclick="clearPendingQueue()">清空队列</button>
+          <button class="btn btn-primary" id="startBatchBurnBtn" style="font-size:12px; padding:6px 12px;" onclick="startBatchBurnFromQueue()" disabled>🔥 开始压制</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="container">
@@ -486,6 +509,135 @@ function openPreviewNewTab() {
   window.open('/preview', '_blank');
 }
 
+// 待压制队列管理
+function showPendingQueueModal() {
+  loadPendingQueue();
+  document.getElementById('pendingQueueModal').style.display = 'flex';
+}
+
+function closePendingQueueModal() {
+  document.getElementById('pendingQueueModal').style.display = 'none';
+}
+
+function loadPendingQueue() {
+  // 从 localStorage 加载预览页面的队列
+  let burnQueue = [];
+  try {
+    const saved = localStorage.getItem('burnQueue');
+    if (saved) {
+      burnQueue = JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error('Failed to load burn queue:', e);
+  }
+  
+  const list = document.getElementById('pendingQueueList');
+  const count = document.getElementById('pendingQueueCount');
+  const startBtn = document.getElementById('startBatchBurnBtn');
+  
+  count.textContent = burnQueue.length;
+  startBtn.disabled = burnQueue.length === 0;
+  
+  if (burnQueue.length === 0) {
+    list.innerHTML = '<div style="text-align:center; padding:40px; color:#94a3b8;">队列为空<br><span style="font-size:12px;">在字幕预览页面添加任务到队列</span></div>';
+    return;
+  }
+  
+  list.innerHTML = burnQueue.map((item, index) => `
+    <div style="display:flex; align-items:center; padding:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px;">
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13px; color:#1e293b; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📹 ${item.videoName || '未知视频'}</div>
+        <div style="font-size:12px; color:#64748b; margin-top:4px;">💬 ${item.subtitleName || '未知字幕'}</div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:2px;">
+          偏移: ${item.params?.timeOffset || 0}s | 字号: ${item.params?.fontSize || 24}px
+        </div>
+      </div>
+      <button onclick="removeFromPendingQueue(${index})" style="background:transparent; border:1px solid #e2e8f0; color:#ef4444; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px; margin-left:12px;">删除</button>
+    </div>
+  `).join('');
+}
+
+function removeFromPendingQueue(index) {
+  let burnQueue = JSON.parse(localStorage.getItem('burnQueue') || '[]');
+  burnQueue.splice(index, 1);
+  localStorage.setItem('burnQueue', JSON.stringify(burnQueue));
+  loadPendingQueue();
+}
+
+function clearPendingQueue() {
+  if (confirm('确定要清空队列吗？')) {
+    localStorage.removeItem('burnQueue');
+    loadPendingQueue();
+  }
+}
+
+async function startBatchBurnFromQueue() {
+  let burnQueue = JSON.parse(localStorage.getItem('burnQueue') || '[]');
+  if (burnQueue.length === 0) return;
+  
+  const startBtn = document.getElementById('startBatchBurnBtn');
+  startBtn.disabled = true;
+  startBtn.textContent = '提交中...';
+  
+  // 获取压制设置
+  let burnSettings = {};
+  try {
+    const saved = localStorage.getItem('burnSettings');
+    if (saved) burnSettings = JSON.parse(saved);
+  } catch (e) {}
+  
+  const subMode = burnSettings.sub_mode || $('#subMode')?.value || 'burn';
+  const keepOriginal = burnSettings.keep_original_sub ?? ($('#keepOriginalSub')?.value === 'true') ?? false;
+  const subName = burnSettings.sub_name || '中文字幕';
+  const codec = burnSettings.codec || $('#codec')?.value || 'libx264';
+  const crf = burnSettings.crf || $('#crf')?.value || '18';
+  const preset = burnSettings.preset || $('#preset')?.value || 'medium';
+  
+  let successCount = 0;
+  let failCount = 0;
+  
+  for (const item of burnQueue) {
+    try {
+      const fd = new FormData();
+      fd.append('video_path', item.videoPath);
+      fd.append('subtitle_path', item.subtitlePath);
+      fd.append('crf', crf);
+      fd.append('preset', preset);
+      fd.append('codec', codec);
+      fd.append('style', '');
+      fd.append('sub_mode', subMode);
+      fd.append('keep_original_sub', keepOriginal);
+      fd.append('sub_name', subName);
+      fd.append('preview_params', JSON.stringify(item.params || {}));
+      
+      const response = await fetch('/api/media/burn', { method: 'POST', body: fd });
+      
+      if (response.ok) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    } catch (error) {
+      failCount++;
+    }
+  }
+  
+  // 清空队列
+  localStorage.removeItem('burnQueue');
+  
+  startBtn.textContent = '🔥 开始压制';
+  startBtn.disabled = false;
+  
+  closePendingQueueModal();
+  
+  if (successCount > 0) {
+    Queue.pollTasks();
+    alert(`已提交 ${successCount} 个任务${failCount > 0 ? `，${failCount} 个失败` : ''}`);
+  } else {
+    alert('提交失败');
+  }
+}
+
 // ESC 键关闭预览
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
@@ -493,6 +645,7 @@ document.addEventListener('keydown', (e) => {
     if (panel.classList.contains('active')) {
       togglePreview();
     }
+    closePendingQueueModal();
   }
 });
 

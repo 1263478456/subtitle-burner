@@ -361,6 +361,18 @@ input[type="range"]::-webkit-slider-thumb {
       </div>
     </div>
 
+    <!-- 内嵌字幕选择 -->
+    <div class="panel-section" id="embeddedSubSection" style="display:none; background:#1a2e1a; border-bottom:2px solid #10b981;">
+      <h3><span class="icon">📝</span> 内嵌字幕</h3>
+      <div class="form-group">
+        <label>选择字幕轨道</label>
+        <select id="embeddedSubSelect" onchange="loadEmbeddedSubtitle()">
+          <option value="">-- 加载内嵌字幕 --</option>
+        </select>
+      </div>
+      <div id="embeddedSubInfo" style="font-size:11px; color:#666; margin-top:4px;"></div>
+    </div>
+
     <!-- 时间偏移 -->
     <div class="panel-section">
       <h3><span class="icon">⏱️</span> 时间偏移</h3>
@@ -397,6 +409,10 @@ input[type="range"]::-webkit-slider-thumb {
             <option value="true">保留</option>
           </select>
         </div>
+      </div>
+      <div class="form-group">
+        <label>字幕轨道名称（软字幕模式）</label>
+        <input type="text" id="burnSubName" value="中文字幕" placeholder="例如：中文字幕、English" style="width:100%; padding:7px 9px; border-radius:5px; border:1px solid var(--border); background:#222; color:var(--text); font-size:12px;">
       </div>
       <div style="display:flex; gap:8px;">
         <div class="form-group" style="flex:1;">
@@ -777,6 +793,7 @@ function loadBurnSettings() {
       const settings = JSON.parse(saved);
       if (settings.sub_mode) document.getElementById('burnSubMode').value = settings.sub_mode;
       if (settings.keep_original_sub !== undefined) document.getElementById('burnKeepOriginal').value = settings.keep_original_sub ? 'true' : 'false';
+      if (settings.sub_name) document.getElementById('burnSubName').value = settings.sub_name;
       if (settings.codec) document.getElementById('burnCodec').value = settings.codec;
       if (settings.crf) document.getElementById('burnCrf').value = settings.crf;
       if (settings.preset) document.getElementById('burnPreset').value = settings.preset;
@@ -1645,6 +1662,35 @@ async function confirmSelection() {
     document.getElementById('videoName').textContent = fileName;
     showToast('视频已加载: ' + fileName);
     
+    // 探测视频信息（包括内嵌字幕）
+    try {
+      const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath));
+      if (probeResponse.ok) {
+        const probeData = await probeResponse.json();
+        
+        // 检查是否有内嵌字幕
+        if (probeData.subtitle_streams && probeData.subtitle_streams.length > 0) {
+          const section = document.getElementById('embeddedSubSection');
+          const select = document.getElementById('embeddedSubSelect');
+          const info = document.getElementById('embeddedSubInfo');
+          
+          select.innerHTML = '<option value="">-- 加载内嵌字幕 --</option>';
+          probeData.subtitle_streams.forEach(stream => {
+            const label = stream.title || `字幕轨道 ${stream.index}`;
+            const lang = stream.language ? ` (${stream.language})` : '';
+            select.innerHTML += `<option value="${stream.index}">${label}${lang} [${stream.codec}]</option>`;
+          });
+          
+          section.style.display = 'block';
+          info.textContent = `检测到 ${probeData.subtitle_streams.length} 个内嵌字幕轨道`;
+        } else {
+          document.getElementById('embeddedSubSection').style.display = 'none';
+        }
+      }
+    } catch (e) {
+      console.error('探测视频信息失败:', e);
+    }
+    
     // 如果需要转码音频，后台异步加载
     if (state.needAudioTranscode) {
       // 初始化 MediaSource
@@ -1688,6 +1734,50 @@ async function confirmSelection() {
 
 // 异步加载音频
 let audioLoading = false; // 加载锁，防止并发加载
+
+// 加载内嵌字幕
+async function loadEmbeddedSubtitle() {
+  const select = document.getElementById('embeddedSubSelect');
+  const subtitleIndex = select.value;
+  
+  if (!subtitleIndex || !state.videoPath) return;
+  
+  const info = document.getElementById('embeddedSubInfo');
+  info.textContent = '正在提取字幕...';
+  
+  try {
+    const url = `/api/media/extract-subtitle?path=${encodeURIComponent(state.videoPath)}&subtitle_index=${parseInt(subtitleIndex)}`;
+    const response = await fetch(url);
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || '提取失败');
+    }
+    
+    const data = await response.json();
+    
+    // 加载字幕内容
+    state.subtitleContent = data.content;
+    state.subtitlePath = data.filename;
+    state.subtitleType = data.type === '.ass' ? 'ass' : (data.type === '.vtt' ? 'vtt' : 'srt');
+    
+    // 解析字幕
+    parseSubtitle();
+    
+    // 更新 UI
+    document.getElementById('subName').textContent = data.filename;
+    info.textContent = `✓ 已加载: ${data.title} [${data.codec}]`;
+    
+    showToast(`已加载内嵌字幕: ${data.title}`);
+    
+  } catch (error) {
+    console.error('加载内嵌字幕失败:', error);
+    info.textContent = `✗ 加载失败: ${error.message}`;
+    showToast('加载内嵌字幕失败', 'error');
+  }
+}
+
+// 加载内嵌字幕的异步函数
 
 // 初始化 MediaSource 音频播放
 function initMediaSourceAudio() {
@@ -2382,6 +2472,7 @@ async function startBatchBurn() {
   const burnSettings = {
     sub_mode: document.getElementById('burnSubMode').value,
     keep_original_sub: document.getElementById('burnKeepOriginal').value === 'true',
+    sub_name: document.getElementById('burnSubName').value || '中文字幕',
     codec: document.getElementById('burnCodec').value,
     crf: document.getElementById('burnCrf').value,
     preset: document.getElementById('burnPreset').value
@@ -2404,6 +2495,7 @@ async function startBatchBurn() {
       fd.append('style', '');
       fd.append('sub_mode', burnSettings.sub_mode);
       fd.append('keep_original_sub', burnSettings.keep_original_sub);
+      fd.append('sub_name', burnSettings.sub_name);
       fd.append('preview_params', JSON.stringify(item.params));
       
       const response = await fetch('/api/media/burn', {

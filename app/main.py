@@ -56,6 +56,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     """构建 FFmpeg 命令"""
     sub_mode = params.get('sub_mode', 'burn')
     keep_original_sub = params.get('keep_original_sub', False)
+    sub_name = params.get('sub_name', '中文字幕')  # 字幕轨道名称
     crf = params.get('crf', 18)
     preset = params.get('preset', 'medium')
     codec = params.get('codec', 'libx264')
@@ -107,6 +108,9 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         
         cmd.extend(["-c:a", "copy"])
         cmd.extend(["-c:s", "mov_text"])  # 字幕编码
+        
+        # 设置字幕轨道名称
+        cmd.extend(["-metadata:s:s:0", f"title={sub_name}"])
         
         # 是否保留原字幕
         if not keep_original_sub:
@@ -510,14 +514,14 @@ class NoCacheFileResponse(_FR):
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)
 async def container_health():
-    return {"status": "ok", "version": "3.0.91"}
+    return {"status": "ok", "version": "3.0.92"}
 
 @app.get("/api/health")
 async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.0.91",
+        "version": "3.0.92",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
@@ -764,15 +768,137 @@ async def probe_media_file(path: str, request: Request):
                 audio_channels = stream.get("channels")
                 break
         
+        # 提取字幕流信息
+        subtitle_streams = []
+        for stream in info.get("streams", []):
+            if stream.get("codec_type") == "subtitle":
+                subtitle_streams.append({
+                    "index": stream.get("index"),
+                    "codec": stream.get("codec_name", "unknown"),
+                    "title": stream.get("tags", {}).get("title") or stream.get("display_name") or f"字幕轨道 {stream.get('index')}",
+                    "language": stream.get("tags", {}).get("language", "")
+                })
+        
         return {
             "audio_codec": audio_codec,
             "audio_channels": audio_channels,
             "format": info.get("format", {}),
-            "streams": info.get("streams", [])
+            "streams": info.get("streams", []),
+            "subtitle_streams": subtitle_streams,
+            "duration": float(info.get("format", {}).get("duration", 0))
         }
     except Exception as e:
         logger.error(f"媒体探测失败: {e}")
         return {"audio_codec": "unknown", "audio_channels": 0, "error": str(e)}
+
+@app.get("/api/media/extract-subtitle")
+async def extract_embedded_subtitle(
+    path: str,
+    request: Request,
+    subtitle_index: int = 0
+):
+    """从视频中提取内嵌字幕"""
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "请先登录")
+    
+    if ".." in path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    video_exts = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v']
+    if full_path.suffix.lower() not in video_exts:
+        raise HTTPException(400, "不是视频文件")
+    
+    try:
+        # 先探测字幕流
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_streams", "-select_streams", "s",
+            str(full_path)
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        
+        if probe_result.returncode != 0:
+            raise Exception("ffprobe 失败")
+        
+        import json as _json
+        info = _json.loads(probe_result.stdout)
+        subtitle_streams = [s for s in info.get("streams", []) if s.get("codec_type") == "subtitle"]
+        
+        if not subtitle_streams:
+            raise HTTPException(404, "视频中没有内嵌字幕")
+        
+        if subtitle_index >= len(subtitle_streams):
+            subtitle_index = 0
+        
+        # 提取字幕
+        subtitle_stream = subtitle_streams[subtitle_index]
+        stream_index = subtitle_stream.get("index", 0)
+        codec_name = subtitle_stream.get("codec_name", "unknown")
+        
+        # 生成临时文件
+        temp_dir = Path("/tmp/preview_cache")
+        temp_dir.mkdir(exist_ok=True)
+        
+        # 根据编码选择输出格式
+        if codec_name in ['ass', 'ssa']:
+            output_ext = '.ass'
+        else:
+            output_ext = '.srt'
+        
+        temp_file = temp_dir / f"subtitle_{hashlib.md5(f'{path}_{subtitle_index}'.encode()).hexdigest()[:16]}{output_ext}"
+        
+        # 提取字幕
+        extract_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(full_path),
+            "-map", f"0:{stream_index}",
+            "-c:s", "copy" if output_ext == '.ass' else "srt",
+            str(temp_file)
+        ]
+        
+        extract_result = subprocess.run(extract_cmd, capture_output=True, timeout=30)
+        
+        if extract_result.returncode != 0:
+            # 尝试转换为 SRT 格式
+            extract_cmd = [
+                "ffmpeg", "-y",
+                "-i", str(full_path),
+                "-map", f"0:{stream_index}",
+                "-c:s", "srt",
+                str(temp_file.with_suffix('.srt'))
+            ]
+            extract_result = subprocess.run(extract_cmd, capture_output=True, timeout=30)
+            
+            if extract_result.returncode != 0:
+                raise Exception(f"字幕提取失败: {extract_result.stderr.decode()[-300:]}")
+            
+            temp_file = temp_file.with_suffix('.srt')
+        
+        # 读取字幕内容
+        content = temp_file.read_text(encoding='utf-8', errors='ignore')
+        
+        # 获取字幕标题
+        title = subtitle_stream.get("tags", {}).get("title") or f"字幕轨道 {stream_index}"
+        language = subtitle_stream.get("tags", {}).get("language", "")
+        
+        return {
+            "content": content,
+            "filename": f"{Path(path).stem}_{title}{output_ext}",
+            "type": output_ext,
+            "title": title,
+            "language": language,
+            "codec": codec_name
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[字幕提取] 失败: {e}")
+        raise HTTPException(500, f"字幕提取失败: {str(e)}")
 
 @app.get("/api/media/preview-stream")
 async def preview_stream_media(
