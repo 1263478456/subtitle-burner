@@ -1104,42 +1104,88 @@ function parseSubtitle() {
 
 // 解析 SRT
 function parseSRT() {
+  console.log('[SRT] 开始解析 SRT 格式');
   const blocks = state.subtitleContent.trim().split(/\n\s*\n/);
+  console.log('[SRT] 文本块数:', blocks.length);
   
-  blocks.forEach(block => {
+  let parsedCount = 0;
+  let skippedCount = 0;
+  
+  blocks.forEach((block, blockIndex) => {
     const lines = block.trim().split('\n');
-    if (lines.length < 3) return;
+    if (lines.length < 3) {
+      skippedCount++;
+      return;
+    }
     
     const timeMatch = lines[1].match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
-    if (!timeMatch) return;
+    if (!timeMatch) {
+      skippedCount++;
+      return;
+    }
     
     const start = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
     const end = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
     const text = lines.slice(2).join('\n').replace(/<[^>]+>/g, '');
     
     state.parsedSubtitles.push({ start, end, text });
+    parsedCount++;
+    
+    // 输出前3条字幕用于调试
+    if (parsedCount <= 3) {
+      console.log(`[SRT] 字幕 ${parsedCount}:`, {
+        start: start.toFixed(2),
+        end: end.toFixed(2),
+        text: text.substring(0, 50)
+      });
+    }
   });
+  
+  console.log(`[SRT] 解析统计: ${parsedCount} 条有效, ${skippedCount} 条跳过`);
 }
 
 // 解析 VTT
 function parseVTT() {
+  console.log('[VTT] 开始解析 VTT 格式');
   const content = state.subtitleContent.replace(/^WEBVTT\s*\n/, '');
   const blocks = content.trim().split(/\n\s*\n/);
+  console.log('[VTT] 文本块数:', blocks.length);
   
-  blocks.forEach(block => {
+  let parsedCount = 0;
+  let skippedCount = 0;
+  
+  blocks.forEach((block, blockIndex) => {
     const lines = block.trim().split('\n');
     let timeLineIndex = lines.findIndex(l => l.includes('-->'));
-    if (timeLineIndex === -1) return;
+    if (timeLineIndex === -1) {
+      skippedCount++;
+      return;
+    }
     
     const timeMatch = lines[timeLineIndex].match(/(\d{2}):(\d{2}):(\d{2})[.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[.](\d{3})/);
-    if (!timeMatch) return;
+    if (!timeMatch) {
+      skippedCount++;
+      return;
+    }
     
     const start = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
     const end = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
     const text = lines.slice(timeLineIndex + 1).join('\n').replace(/<[^>]+>/g, '');
     
     state.parsedSubtitles.push({ start, end, text });
+    parsedCount++;
+    
+    // 输出前3条字幕用于调试
+    if (parsedCount <= 3) {
+      console.log(`[VTT] 字幕 ${parsedCount}:`, {
+        start: start.toFixed(2),
+        end: end.toFixed(2),
+        text: text.substring(0, 50)
+      });
+    }
   });
+  
+  console.log(`[VTT] 解析统计: ${parsedCount} 条有效, ${skippedCount} 条跳过`);
 }
 
 // 解析 ASS
