@@ -52,6 +52,213 @@ def _detect_encoders():
         logger.error(f"FFmpeg 编码器检测失败: {e}")
     return encoders
 
+def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
+    """构建 FFmpeg 命令"""
+    sub_mode = params.get('sub_mode', 'burn')
+    keep_original_sub = params.get('keep_original_sub', False)
+    crf = params.get('crf', 18)
+    preset = params.get('preset', 'medium')
+    codec = params.get('codec', 'libx264')
+    
+    # 预览参数（用于字幕样式调整）
+    preview_params = {}
+    if 'preview_params' in params:
+        try:
+            preview_params = json.loads(params['preview_params']) if isinstance(params['preview_params'], str) else params['preview_params']
+        except:
+            pass
+    
+    cmd = ["ffmpeg", "-y"]
+    
+    # 字幕路径转义
+    sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
+    sub_path_posix = str(sub_path).replace("\\", "/")
+    
+    # 时间偏移
+    time_offset = preview_params.get('timeOffset', 0)
+    if time_offset and time_offset != 0:
+        # 使用 -itsoffset 参数实现时间偏移（不支持小数点格式的偏移）
+        # 对于字幕，我们通过修改 subtitles 滤镜的 ts_offset 来实现
+        logger.info(f"[FFmpeg] 时间偏移: {time_offset}s")
+    
+    if sub_mode == 'soft':
+        # 软字幕模式：添加字幕轨道
+        cmd.extend(["-i", str(video_path)])
+        
+        # 添加字幕文件作为输入
+        cmd.extend(["-i", str(sub_path_posix)])
+        
+        # 映射流
+        cmd.extend(["-map", "0:v", "-map", "0:a?"])
+        cmd.extend(["-map", "1:0"])  # 添加字幕轨道
+        
+        # 视频编码
+        if codec.startswith('h264_nvenc') or codec.startswith('hevc_nvenc'):
+            cmd.extend(["-c:v", codec])
+            cmd.extend(["-preset", "p5"])
+            cmd.extend(["-rc", "vbr", "-cq", str(crf)])
+        elif codec.startswith('h264_qsv') or codec.startswith('hevc_qsv'):
+            cmd.extend(["-c:v", codec])
+            cmd.extend(["-global_quality", str(crf)])
+        else:
+            cmd.extend(["-c:v", codec])
+            cmd.extend(["-crf", str(crf)])
+            cmd.extend(["-preset", preset])
+        
+        cmd.extend(["-c:a", "copy"])
+        cmd.extend(["-c:s", "mov_text"])  # 字幕编码
+        
+        # 是否保留原字幕
+        if not keep_original_sub:
+            # 只保留新添加的字幕
+            cmd.extend(["-map", "-0:s?"])
+            cmd.extend(["-map", "1:0"])
+        
+    else:
+        # 硬字幕模式：烧录字幕到视频
+        
+        # 添加时间偏移参数
+        if time_offset and time_offset != 0:
+            # 使用 -itsoffset 偏移字幕
+            cmd.extend(["-itsoffset", str(time_offset)])
+        
+        cmd.extend(["-i", str(video_path)])
+        
+        # 构建字幕滤镜
+        vf_filter = f"subtitles='{sub_path_escaped}'"
+        
+        # SRT/VTT 样式强制设置
+        if sub_path.suffix.lower() in ['.srt', '.vtt']:
+            # 构建样式字符串
+            style_parts = []
+            
+            if preview_params.get('fontSize'):
+                style_parts.append(f"FontSize={preview_params['fontSize']}")
+            
+            if preview_params.get('fontFamily'):
+                font_map = {
+                    'sans-serif': 'Arial',
+                    'serif': 'Times New Roman',
+                    'monospace': 'Courier New',
+                    'Microsoft YaHei': 'Microsoft YaHei',
+                    'PingFang SC': 'PingFang SC',
+                    'SimHei': 'SimHei',
+                    'SimSun': 'SimSun',
+                    'KaiTi': 'KaiTi',
+                }
+                font_name = font_map.get(preview_params['fontFamily'], 'Arial')
+                style_parts.append(f"FontName={font_name}")
+            
+            if preview_params.get('fontColor'):
+                color = preview_params['fontColor']
+                # 转换 #RRGGBB 为 ASS 颜色格式 &HBBGGRR&
+                if color.startswith('#') and len(color) == 7:
+                    r, g, b = color[1:3], color[3:5], color[5:7]
+                    ass_color = f"&H00{b}{g}{r}&"
+                    style_parts.append(f"PrimaryColour={ass_color}")
+            
+            if preview_params.get('outlineWidth'):
+                style_parts.append(f"Outline={preview_params['outlineWidth']}")
+            
+            if preview_params.get('outlineColor'):
+                color = preview_params['outlineColor']
+                if color.startswith('#') and len(color) == 7:
+                    r, g, b = color[1:3], color[3:5], color[5:7]
+                    ass_color = f"&H00{b}{g}{r}&"
+                    style_parts.append(f"OutlineColour={ass_color}")
+            
+            if preview_params.get('shadowOffset'):
+                style_parts.append(f"Shadow={preview_params['shadowOffset']}")
+            
+            if preview_params.get('fontWeight') == 'bold':
+                style_parts.append("Bold=1")
+            elif preview_params.get('fontWeight') == 'lighter':
+                style_parts.append("Bold=0")
+            
+            # 位置调整
+            if preview_params.get('positionY'):
+                alignment_map = {
+                    'bottom': 2,  # 底部居中
+                    'top': 8,     # 顶部居中
+                    'center': 5,  # 居中
+                }
+                alignment = alignment_map.get(preview_params['positionY'], 2)
+                style_parts.append(f"Alignment={alignment}")
+            
+            if preview_params.get('marginBottom') and preview_params.get('positionY', 'bottom') == 'bottom':
+                style_parts.append(f"MarginV={preview_params['marginBottom']}")
+            elif preview_params.get('marginTop') and preview_params.get('positionY') == 'top':
+                style_parts.append(f"MarginV={preview_params['marginTop']}")
+            
+            if style_parts:
+                style_str = ','.join(style_parts)
+                vf_filter += f":force_style='{style_str}'"
+        
+        # ASS 字幕：如果有预览参数，可能需要覆盖样式
+        elif sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
+            # ASS 字幕已经有完整样式定义，但我们可以通过 ASS 滤镜的 force_style 覆盖部分
+            style_parts = []
+            
+            if preview_params.get('fontSize'):
+                style_parts.append(f"FontSize={preview_params['fontSize']}")
+            
+            if preview_params.get('fontFamily'):
+                font_map = {
+                    'sans-serif': 'Arial',
+                    'serif': 'Times New Roman',
+                    'monospace': 'Courier New',
+                    'Microsoft YaHei': 'Microsoft YaHei',
+                    'PingFang SC': 'PingFang SC',
+                    'SimHei': 'SimHei',
+                    'SimSun': 'SimSun',
+                    'KaiTi': 'KaiTi',
+                }
+                font_name = font_map.get(preview_params['fontFamily'], 'Arial')
+                style_parts.append(f"FontName={font_name}")
+            
+            if preview_params.get('fontColor'):
+                color = preview_params['fontColor']
+                if color.startswith('#') and len(color) == 7:
+                    r, g, b = color[1:3], color[3:5], color[5:7]
+                    ass_color = f"&H00{b}{g}{r}&"
+                    style_parts.append(f"PrimaryColour={ass_color}")
+            
+            if style_parts:
+                style_str = ','.join(style_parts)
+                vf_filter += f":force_style='{style_str}'"
+        
+        cmd.extend(["-vf", vf_filter])
+        
+        # 视频编码
+        if codec.startswith('h264_nvenc') or codec.startswith('hevc_nvenc'):
+            cmd.extend(["-c:v", codec])
+            cmd.extend(["-preset", "p5"])
+            cmd.extend(["-rc", "vbr", "-cq", str(crf)])
+            cmd.extend(["-pix_fmt", "yuv420p"])
+        elif codec.startswith('h264_qsv') or codec.startswith('hevc_qsv'):
+            cmd.extend(["-c:v", codec])
+            cmd.extend(["-global_quality", str(crf)])
+        else:
+            cmd.extend(["-c:v", codec])
+            cmd.extend(["-crf", str(crf)])
+            cmd.extend(["-preset", preset])
+        
+        # 音频：直接复制
+        cmd.extend(["-c:a", "copy"])
+        
+        # 映射流
+        cmd.extend(["-map", "0:v:0", "-map", "0:a?"])
+        
+        # 是否保留原字幕
+        if keep_original_sub:
+            cmd.extend(["-map", "0:s?"])
+    
+    # 输出文件
+    cmd.extend(["-movflags", "+faststart"])
+    cmd.append(str(output_path))
+    
+    return cmd
+
 GPU_ENCODERS = _detect_encoders()
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
@@ -303,14 +510,14 @@ class NoCacheFileResponse(_FR):
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)
 async def container_health():
-    return {"status": "ok", "version": "3.0.89"}
+    return {"status": "ok", "version": "3.0.90"}
 
 @app.get("/api/health")
 async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.0.89",
+        "version": "3.0.90",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
