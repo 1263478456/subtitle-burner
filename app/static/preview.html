@@ -1070,7 +1070,17 @@ function detectSubtitleType(filename) {
 
 // 解析字幕
 function parseSubtitle() {
-  if (!state.subtitleContent) return;
+  console.log('[subtitle] === 开始解析字幕 ===');
+  console.log('[subtitle] 类型:', state.subtitleType);
+  console.log('[subtitle] 内容长度:', state.subtitleContent?.length || 0);
+  
+  if (!state.subtitleContent) {
+    console.error('[subtitle] 错误: 字幕内容为空');
+    return;
+  }
+  
+  // 输出前500字符用于调试
+  console.log('[subtitle] 内容预览:', state.subtitleContent.substring(0, 500));
   
   state.parsedSubtitles = [];
   
@@ -1082,9 +1092,13 @@ function parseSubtitle() {
     parseASS();
   }
   
-  console.log(`[subtitle] Parsed ${state.parsedSubtitles.length} subtitles (${state.subtitleType})`);
+  console.log(`[subtitle] 解析完成: ${state.parsedSubtitles.length} 条字幕`);
+  
   if (state.parsedSubtitles.length > 0) {
-    console.log('[subtitle] First subtitle:', state.parsedSubtitles[0]);
+    console.log('[subtitle] 第一条:', JSON.stringify(state.parsedSubtitles[0]));
+    console.log('[subtitle] 最后一条:', JSON.stringify(state.parsedSubtitles[state.parsedSubtitles.length - 1]));
+  } else {
+    console.warn('[subtitle] 警告: 没有解析到任何字幕!');
   }
 }
 
@@ -1130,10 +1144,15 @@ function parseVTT() {
 
 // 解析 ASS
 function parseASS() {
+  console.log('[ASS] 开始解析 ASS 格式');
   const lines = state.subtitleContent.split('\n');
+  console.log('[ASS] 总行数:', lines.length);
+  
   let inEvents = false;
   let format = [];
   let formatFieldCount = 0;
+  let dialogueCount = 0;
+  let skippedCount = 0;
   
   for (let i = 0; i < lines.length; i++) {
     let line = lines[i].trim();
@@ -1143,7 +1162,16 @@ function parseASS() {
     
     // 检测段落
     if (line.startsWith('[')) {
-      inEvents = (line.toLowerCase() === '[events]');
+      const section = line.toLowerCase();
+      if (section === '[events]') {
+        inEvents = true;
+        console.log(`[ASS] 找到 [Events] 段落 (行 ${i})`);
+      } else {
+        if (inEvents) {
+          console.log(`[ASS] 离开 [Events] 段落 (行 ${i})`);
+        }
+        inEvents = false;
+      }
       continue;
     }
     
@@ -1153,11 +1181,13 @@ function parseASS() {
     if (line.startsWith('Format:')) {
       format = line.substring(7).split(',').map(s => s.trim());
       formatFieldCount = format.length;
+      console.log('[ASS] Format 字段:', format);
       continue;
     }
     
     // 解析 Dialogue 行
     if (line.startsWith('Dialogue:')) {
+      dialogueCount++;
       const dialogueContent = line.substring(9);
       
       // ASS 格式：Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
@@ -1181,6 +1211,7 @@ function parseASS() {
         // 如果没有 Format 行，使用默认 ASS 格式
         format = ['Layer', 'Start', 'End', 'Style', 'Name', 'MarginL', 'MarginR', 'MarginV', 'Effect', 'Text'];
         formatFieldCount = format.length;
+        console.log('[ASS] 使用默认 Format:', format);
       }
       
       const startIndex = format.indexOf('Start');
@@ -1188,33 +1219,43 @@ function parseASS() {
       const textIndex = format.indexOf('Text');
       const styleIndex = format.indexOf('Style');
       
-      if (startIndex === -1 || endIndex === -1 || textIndex === -1) continue;
+      if (startIndex === -1 || endIndex === -1 || textIndex === -1) {
+        console.warn(`[ASS] 行 ${i}: Format 索引无效 (Start:${startIndex}, End:${endIndex}, Text:${textIndex})`);
+        skippedCount++;
+        continue;
+      }
       
       const start = parseASSTime(parts[startIndex]?.trim());
       const end = parseASSTime(parts[endIndex]?.trim());
       
-      // 获取文本（可能是最后一个字段）
+      // 获取文本
       let text = parts[textIndex] || '';
-      // 如果文本字段后面还有内容（因为逗号分割问题），合并它们
       if (textIndex < parts.length - 1) {
         text = parts.slice(textIndex).join(',');
       }
       text = text.trim();
       
       // 处理 ASS 特殊标签
-      text = text.replace(/\{[^}]*\}/g, '');  // 移除所有样式标签
-      text = text.replace(/\\N/g, '\n');       // 换行符
-      text = text.replace(/\\n/g, '\n');       // 换行符
-      text = text.replace(/\\h/g, ' ');        // 空格
+      const originalText = text;
+      text = text.replace(/\{[^}]*\}/g, '');
+      text = text.replace(/\\N/g, '\n');
+      text = text.replace(/\\n/g, '\n');
+      text = text.replace(/\\h/g, ' ');
       
-      // 获取样式信息（可选，用于未来扩展）
+      // 获取样式信息
       const style = styleIndex >= 0 ? parts[styleIndex]?.trim() : 'Default';
       
       // 跳过空文本和注释样式
-      if (!text || style.startsWith('comment')) continue;
+      if (!text || style.startsWith('comment')) {
+        skippedCount++;
+        continue;
+      }
       
       // 跳过特效字幕（如卡拉OK）
-      if (text.match(/^\{\\[kK]\d+\}/)) continue;
+      if (text.match(/^\{\\[kK]\d+\}/)) {
+        skippedCount++;
+        continue;
+      }
       
       state.parsedSubtitles.push({ 
         start, 
@@ -1222,8 +1263,20 @@ function parseASS() {
         text,
         style 
       });
+      
+      // 输出前3条字幕用于调试
+      if (state.parsedSubtitles.length <= 3) {
+        console.log(`[ASS] 字幕 ${state.parsedSubtitles.length}:`, {
+          start: start.toFixed(2),
+          end: end.toFixed(2),
+          text: text.substring(0, 50),
+          style: style
+        });
+      }
     }
   }
+  
+  console.log(`[ASS] 解析统计: ${dialogueCount} 条 Dialogue, ${state.parsedSubtitles.length} 条有效, ${skippedCount} 条跳过`);
 }
 
 // 解析 ASS 时间
@@ -1269,6 +1322,12 @@ function parseASSTime(timeStr) {
 function updateSubtitleDisplay() {
   const currentTime = video.currentTime + state.params.timeOffset;
   
+  // 每5秒输出一次调试信息（避免日志太多）
+  if (Math.floor(currentTime) % 5 === 0 && Math.floor(currentTime) !== state._lastLogTime) {
+    state._lastLogTime = Math.floor(currentTime);
+    console.log(`[display] 当前时间: ${currentTime.toFixed(2)}s, 偏移: ${state.params.timeOffset}s, 字幕数: ${state.parsedSubtitles.length}`);
+  }
+  
   let foundIndex = -1;
   for (let i = 0; i < state.parsedSubtitles.length; i++) {
     const sub = state.parsedSubtitles[i];
@@ -1283,9 +1342,14 @@ function updateSubtitleDisplay() {
   
   overlay.innerHTML = '';
   
-  if (foundIndex === -1) return;
+  if (foundIndex === -1) {
+    // 没有找到匹配的字幕
+    return;
+  }
   
   const sub = state.parsedSubtitles[foundIndex];
+  console.log(`[display] 显示字幕 #${foundIndex}:`, sub.text.substring(0, 30));
+  
   const lines = sub.text.split('\n');
   
   lines.forEach((line, index) => {
@@ -1483,18 +1547,34 @@ async function confirmSelection() {
     }
     
   } else {
+    console.log('[load] 加载字幕文件:', selectedPath);
     try {
       const response = await fetch('/api/media/file?path=' + encodeURIComponent(selectedPath));
-      if (!response.ok) throw new Error('获取失败');
+      console.log('[load] 字幕 API 响应:', response.status);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[load] API 错误:', errorText);
+        throw new Error('获取失败');
+      }
       
       const data = await response.json();
+      console.log('[load] 字幕数据:', {
+        filename: data.filename,
+        type: data.type,
+        contentLength: data.content?.length || 0
+      });
+      
       state.subtitleContent = data.content;
       state.subtitlePath = selectedPath;
       state.subtitleType = detectSubtitleType(fileName);
+      console.log('[load] 检测字幕类型:', state.subtitleType);
+      
       parseSubtitle();
       document.getElementById('subName').textContent = fileName;
       showToast('字幕已加载: ' + fileName);
     } catch (error) {
+      console.error('[load] 加载字幕失败:', error);
       showToast('加载字幕失败: ' + error.message, 'error');
     }
   }
