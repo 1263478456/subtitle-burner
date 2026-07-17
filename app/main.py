@@ -364,8 +364,33 @@ def require_auth(request: Request):
 async def run_burn_task(task_id):
     task = tasks.get(task_id)
     if not task:
-        logger.warning(f"[队列工作者] 任务 {task_id} 不在内存中，跳过")
-        return
+        # 尝试从数据库加载任务
+        logger.info(f"[队列工作者] 任务 {task_id} 不在内存中，尝试从数据库加载")
+        rows = db_query("SELECT * FROM tasks WHERE task_id=?", (task_id,))
+        if rows:
+            r = rows[0]
+            params = {}
+            if r["params"]:
+                try:
+                    params = json.loads(r["params"])
+                except:
+                    pass
+            task = {
+                "task_id": task_id,
+                "user": r["user"],
+                "video_name": r["video_name"],
+                "subtitle_name": r["subtitle_name"] if "subtitle_name" in r.keys() else "",
+                "status": r["status"],
+                "progress": r["progress"],
+                "params": params,
+                "created_at": r["created_at"],
+                "error": r["error"]
+            }
+            tasks[task_id] = task
+            logger.info(f"[队列工作者] 已从数据库加载任务: {task_id} ({r['video_name']})")
+        else:
+            logger.warning(f"[队列工作者] 任务 {task_id} 数据库中也不存在，跳过")
+            return
     logger.info(f"[队列工作者] 开始处理任务: {task_id}, 视频: {task.get('video_name')}")
     try:
         tasks[task_id]["status"] = "processing"
@@ -496,7 +521,7 @@ async def lifespan(app):
 
 def recover_stuck_tasks():
     """启动时恢复卡住的任务（容器重启后 FFmpeg 进程已消失）"""
-    stuck_tasks = db_query("SELECT task_id, video_name FROM tasks WHERE status IN ('queued', 'processing')")
+    stuck_tasks = db_query("SELECT * FROM tasks WHERE status IN ('queued', 'processing')")
     if stuck_tasks:
         logger.info(f"[启动恢复] 发现 {len(stuck_tasks)} 个卡住的任务，正在重置...")
         for task in stuck_tasks:
