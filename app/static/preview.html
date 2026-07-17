@@ -447,8 +447,13 @@ input[type="range"]::-webkit-slider-thumb {
         </select>
       </div>
       <div id="embeddedSubInfo" style="font-size:11px; color:#666; margin-top:4px;"></div>
-      <div style="margin-top:8px;">
-        <button class="btn btn-ghost btn-sm" onclick="showRemoveSubtitlesModal()" style="width:100%;">🗑️ 删除内嵌字幕</button>
+      <div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="markDeleteAllSubtitles()" id="deleteAllSubBtn" style="width:100%; border-color:#ef4444; color:#ef4444;">🗑️ 删除全部内嵌字幕</button>
+        <button class="btn btn-ghost btn-sm" onclick="showRemoveSubtitlesModal()" id="deleteByLangBtn" style="width:100%;">🌐 按语言删除内嵌字幕</button>
+      </div>
+      <div id="subDeleteStatus" style="display:none; margin-top:8px; padding:8px; background:#1a1a2e; border:1px solid #f59e0b; border-radius:6px; font-size:11px; color:#f59e0b;">
+        <div id="subDeleteStatusText"></div>
+        <button onclick="clearRemoveSubtitles()" style="margin-top:4px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; padding:2px 8px; border-radius:4px; cursor:pointer; font-size:10px;">↩️ 取消</button>
       </div>
     </div>
 
@@ -702,20 +707,25 @@ input[type="range"]::-webkit-slider-thumb {
         </div>
       </div>
       <div id="subtitleKeepSection" style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:12px;">
-        <div style="color:#10b981; font-size:12px; font-weight:500; margin-bottom:8px;">🎬 内嵌字幕处理（按语言匹配）</div>
-        <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <div style="color:#10b981; font-size:12px; font-weight:500; margin-bottom:8px;">🎬 内嵌字幕处理</div>
+        <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
             <input type="radio" name="subKeepMode" value="all_except" checked onchange="toggleSubKeepMode()"> 保留指定语言，删除其他
           </label>
           <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
             <input type="radio" name="subKeepMode" value="delete_selected" onchange="toggleSubKeepMode()"> 删除指定语言，保留其他
           </label>
+          <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
+            <input type="radio" name="subKeepMode" value="delete_all" onchange="toggleSubKeepMode()"> 删除全部内嵌字幕
+          </label>
         </div>
-        <div style="font-size:11px; color:#999; margin-bottom:6px;">
-          输入要保留/删除的语言代码（逗号分隔）：<br>
-          <span style="color:#10b981;">常用：chi=中文, eng=英文, jpn=日文, kor=韩文, fre=法文, ger=德文, spa=西文</span>
+        <div id="subKeepLangSection">
+          <div style="font-size:11px; color:#999; margin-bottom:6px;">
+            输入要保留/删除的语言代码（逗号分隔）：<br>
+            <span style="color:#10b981;">常用：chi=中文, eng=英文, jpn=日文, kor=韩文, fre=法文, ger=德文, spa=西文</span>
+          </div>
+          <input type="text" id="subKeepLanguages" placeholder="例如: chi,eng" style="width:100%; padding:6px 10px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
         </div>
-        <input type="text" id="subKeepLanguages" placeholder="例如: chi,eng" style="width:100%; padding:6px 10px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
       </div>
       <div style="background:#222; border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px; color:#999; max-height:200px; overflow-y:auto;">
         <div style="margin-bottom:8px; color:#e5e5e5; font-weight:500;">当前参数预览：</div>
@@ -942,7 +952,7 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshPresets();
   
   // 恢复删除字幕标记状态
-  updateRemoveSubtitlesButton();
+  updateSubDeleteStatus();
 });
 
 // Toast提示
@@ -2146,47 +2156,66 @@ async function executeRemoveSubtitles() {
   // 保存字幕语言设置到 localStorage（供预设使用）
   const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
   const subKeepLanguages = document.getElementById('subKeepLanguages')?.value?.trim() || '';
+  
   if (mode === 'select' && subKeepLanguages) {
+    state.removeSubtitleMode = 'language';
+    localStorage.setItem('removeSubtitleMode', 'language');
     localStorage.setItem('subKeepMode', subKeepMode);
     localStorage.setItem('subKeepLanguages', subKeepLanguages);
   } else {
+    state.removeSubtitleMode = 'all';
+    localStorage.setItem('removeSubtitleMode', 'all');
     localStorage.removeItem('subKeepMode');
     localStorage.removeItem('subKeepLanguages');
   }
   
-  // 更新按钮显示
+  // 更新状态显示
+  updateSubDeleteStatus();
   updateRemoveSubtitlesButton();
 }
 
-// 更新删除字幕按钮显示
-function updateRemoveSubtitlesButton() {
-  const btn = document.querySelector('#embeddedSubSection button');
-  if (!btn) return;
-  
-  const count = parseInt(localStorage.getItem('removeSubtitleCount') || '0');
-  const mode = localStorage.getItem('removeSubtitleMode') || 'select';
-  
-  if (count !== 0) {
-    const label = count === -1 ? '🗑️ 已标记删除全部字幕' : `🗑️ 已标记删除 ${count} 个轨道`;
-    btn.innerHTML = label;
-    btn.style.borderColor = '#f59e0b';
-    btn.style.color = '#f59e0b';
-    // 添加取消按钮
-    if (!document.getElementById('cancelRemoveBtn')) {
-      const cancelBtn = document.createElement('button');
-      cancelBtn.id = 'cancelRemoveBtn';
-      cancelBtn.className = 'btn btn-ghost btn-sm';
-      cancelBtn.style.cssText = 'width:100%; margin-top:6px;';
-      cancelBtn.textContent = '↩️ 取消删除';
-      cancelBtn.onclick = clearRemoveSubtitles;
-      btn.parentElement.appendChild(cancelBtn);
-    }
+// 删除全部内嵌字幕
+function markDeleteAllSubtitles() {
+  state.removeSubtitleMode = 'all';
+  state.removeSubtitleCount = -1;
+  localStorage.setItem('removeSubtitleMode', 'all');
+  localStorage.setItem('removeSubtitleCount', '-1');
+  localStorage.removeItem('removeSubtitleIndices');
+  localStorage.removeItem('subKeepMode');
+  localStorage.removeItem('subKeepLanguages');
+  updateSubDeleteStatus();
+  showToast('已标记删除全部字幕，压制时生效', 'success');
+}
+
+// 更新删除状态显示
+function updateSubDeleteStatus() {
+  const statusDiv = document.getElementById('subDeleteStatus');
+  const statusText = document.getElementById('subDeleteStatusText');
+  const mode = localStorage.getItem('removeSubtitleMode') || '';
+  const langs = localStorage.getItem('subKeepLanguages') || '';
+  const subKeepMode = localStorage.getItem('subKeepMode') || '';
+
+  if (mode === 'all') {
+    statusDiv.style.display = 'block';
+    statusText.textContent = '🗑️ 已标记删除全部内嵌字幕';
+    document.getElementById('deleteAllSubBtn').style.borderColor = '#f59e0b';
+    document.getElementById('deleteAllSubBtn').style.color = '#f59e0b';
+    document.getElementById('deleteByLangBtn').style.borderColor = '';
+    document.getElementById('deleteByLangBtn').style.color = '';
+  } else if (mode === 'language' && langs) {
+    const modeLabel = subKeepMode === 'delete_selected' ? '删除指定语言' : '保留指定语言';
+    statusDiv.style.display = 'block';
+    statusText.textContent = `🌐 已标记：${modeLabel} (${langs})`;
+    document.getElementById('deleteByLangBtn').style.borderColor = '#f59e0b';
+    document.getElementById('deleteByLangBtn').style.color = '#f59e0b';
+    document.getElementById('deleteAllSubBtn').style.borderColor = '';
+    document.getElementById('deleteAllSubBtn').style.color = '';
   } else {
-    btn.innerHTML = '🗑️ 删除内嵌字幕';
-    btn.style.borderColor = '';
-    btn.style.color = '';
-    const cancelBtn = document.getElementById('cancelRemoveBtn');
-    if (cancelBtn) cancelBtn.remove();
+    statusDiv.style.display = 'none';
+    document.getElementById('deleteAllSubBtn').style.borderColor = '';
+    document.getElementById('deleteAllSubBtn').style.color = '';
+    document.getElementById('deleteByLangBtn').style.borderColor = '';
+    document.getElementById('deleteByLangBtn').style.color = '';
   }
 }
 
@@ -2199,7 +2228,7 @@ function clearRemoveSubtitles() {
   localStorage.removeItem('removeSubtitleMode');
   localStorage.removeItem('subKeepMode');
   localStorage.removeItem('subKeepLanguages');
-  updateRemoveSubtitlesButton();
+  updateSubDeleteStatus();
   showToast('已取消删除字幕标记', 'success');
 }
 
@@ -2547,11 +2576,14 @@ async function loadPreset(presetId) {
     }
     if (params.subKeepLanguages !== undefined) {
       document.getElementById('subKeepLanguages').value = params.subKeepLanguages;
-      // 保存到 state 供压制时使用
+      // 保存到 state 和 localStorage 供压制时使用
       state.subKeepMode = params.subKeepMode || 'all_except';
       state.subKeepLanguages = params.subKeepLanguages || '';
+      state.removeSubtitleMode = params.subKeepLanguages ? 'language' : '';
       localStorage.setItem('subKeepMode', state.subKeepMode);
       localStorage.setItem('subKeepLanguages', state.subKeepLanguages);
+      localStorage.setItem('removeSubtitleMode', state.removeSubtitleMode);
+      updateSubDeleteStatus();
     }
     
     // 保存压制设置到 localStorage
@@ -2585,11 +2617,18 @@ function closeSavePresetDialog() {
   // 恢复分类勾选
   document.querySelectorAll('.preset-category').forEach(cb => cb.checked = true);
   document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
+  document.getElementById('subKeepLangSection').style.display = 'block';
 }
 
 // 切换字幕保留模式
 function toggleSubKeepMode() {
-  // 只需要切换时更新预览即可
+  const mode = document.querySelector('input[name="subKeepMode"]:checked')?.value;
+  const langSection = document.getElementById('subKeepLangSection');
+  if (mode === 'delete_all') {
+    langSection.style.display = 'none';
+  } else {
+    langSection.style.display = 'block';
+  }
 }
 
 // 更新参数预览
@@ -2618,8 +2657,15 @@ function updatePresetPreview() {
   // 字幕语言保留设置
   const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
   const subKeepLangs = document.getElementById('subKeepLanguages').value.trim();
-  const subKeepLabel = subKeepMode === 'all_except' ? '保留指定语言' : '删除指定语言';
-  const subKeepDisplay = subKeepLangs ? `${subKeepLabel}: ${subKeepLangs}` : '未设置（保留所有）';
+  let subKeepDisplay;
+  if (subKeepMode === 'delete_all') {
+    subKeepDisplay = '删除全部内嵌字幕';
+  } else if (subKeepLangs) {
+    const modeLabel = subKeepMode === 'all_except' ? '保留指定语言' : '删除指定语言';
+    subKeepDisplay = `${modeLabel}: ${subKeepLangs}`;
+  } else {
+    subKeepDisplay = '未设置（保留所有）';
+  }
   
   // 压制选项预览
   const burnPreview = `
@@ -2685,8 +2731,13 @@ async function savePreset() {
   }
   
   if (categories.includes('subtitle_keep')) {
-    params.subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
-    params.subKeepLanguages = document.getElementById('subKeepLanguages').value.trim();
+    const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
+    params.subKeepMode = subKeepMode;
+    if (subKeepMode !== 'delete_all') {
+      params.subKeepLanguages = document.getElementById('subKeepLanguages').value.trim();
+    } else {
+      params.subKeepLanguages = '';
+    }
   }
   
   if (categories.length === 0) {

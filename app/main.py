@@ -1634,7 +1634,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         cmd.extend(["-map", "0:v:0", "-map", "0:a?"])
         
         # 处理原字幕
-        if remove_subtitle_mode == "all":
+        if remove_subtitle_mode == "all" or sub_keep_mode == "delete_all":
             # 删除所有原字幕，只添加新字幕
             pass  # 不映射 0:s
         elif keep_original_sub:
@@ -1680,7 +1680,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     
     # 构建字幕处理参数
     sub_args = []
-    if remove_subtitle_mode == "all":
+    if remove_subtitle_mode == "all" or sub_keep_mode == "delete_all":
         # 删除所有内嵌字幕
         sub_args = ["-sn"]
     elif sub_keep_languages and sub_keep_mode:
