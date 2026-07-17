@@ -514,14 +514,14 @@ class NoCacheFileResponse(_FR):
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)
 async def container_health():
-    return {"status": "ok", "version": "3.0.92"}
+    return {"status": "ok", "version": "3.0.93"}
 
 @app.get("/api/health")
 async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.0.92",
+        "version": "3.0.93",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
@@ -899,6 +899,142 @@ async def extract_embedded_subtitle(
     except Exception as e:
         logger.error(f"[字幕提取] 失败: {e}")
         raise HTTPException(500, f"字幕提取失败: {str(e)}")
+
+@app.post("/api/media/remove-subtitles")
+async def remove_subtitles(
+    request: Request,
+    video_path: str = Form(...),
+    keep_subtitle_indices: str = Form("")
+):
+    """删除视频中的内嵌字幕，只保留指定的轨道
+    
+    Args:
+        video_path: 视频文件路径
+        keep_subtitle_indices: 要保留的字幕轨道索引，逗号分隔，为空则删除所有字幕
+    """
+    user = require_auth(request)
+    
+    if ".." in video_path:
+        raise HTTPException(400, "无效的路径")
+    
+    full_path = MEDIA_ROOT / video_path
+    if not full_path.exists():
+        raise HTTPException(404, "文件不存在")
+    
+    video_exts = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v']
+    if full_path.suffix.lower() not in video_exts:
+        raise HTTPException(400, "不是视频文件")
+    
+    try:
+        # 解析要保留的字幕索引
+        keep_indices = set()
+        if keep_subtitle_indices.strip():
+            for idx in keep_subtitle_indices.split(','):
+                idx = idx.strip()
+                if idx.isdigit():
+                    keep_indices.add(int(idx))
+        
+        # 探测视频流信息
+        probe_cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "json",
+            "-show_streams", str(full_path)
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        
+        if probe_result.returncode != 0:
+            raise Exception("ffprobe 失败")
+        
+        import json as _json
+        info = _json.loads(probe_result.stdout)
+        
+        # 分析流信息
+        streams = info.get("streams", [])
+        video_streams = []
+        audio_streams = []
+        subtitle_streams = []
+        
+        for stream in streams:
+            codec_type = stream.get("codec_type")
+            index = stream.get("index")
+            if codec_type == "video":
+                video_streams.append(index)
+            elif codec_type == "audio":
+                audio_streams.append(index)
+            elif codec_type == "subtitle":
+                subtitle_streams.append({
+                    "index": index,
+                    "codec": stream.get("codec_name", "unknown"),
+                    "title": stream.get("tags", {}).get("title", f"字幕轨道 {index}"),
+                    "language": stream.get("tags", {}).get("language", "")
+                })
+        
+        if not subtitle_streams:
+            raise HTTPException(400, "视频中没有内嵌字幕")
+        
+        # 生成输出文件
+        output_filename = f"{full_path.stem}_no_subs{full_path.suffix}"
+        output_path = full_path.parent / output_filename
+        
+        # 构建 FFmpeg 命令
+        cmd = ["ffmpeg", "-y", "-i", str(full_path)]
+        
+        # 映射视频和音频流
+        for idx in video_streams:
+            cmd.extend(["-map", f"0:{idx}"])
+        for idx in audio_streams:
+            cmd.extend(["-map", f"0:{idx}"])
+        
+        # 映射要保留的字幕流
+        if keep_indices:
+            for sub in subtitle_streams:
+                if sub["index"] in keep_indices:
+                    cmd.extend(["-map", f"0:{sub['index']}"])
+        
+        # 如果不保留任何字幕，添加 -sn 参数
+        if not keep_indices:
+            cmd.append("-sn")
+        
+        # 复制所有流（不重新编码）
+        cmd.extend(["-c", "copy"])
+        
+        # 设置字幕轨道名称（如果保留了字幕）
+        if keep_indices:
+            sub_idx = 0
+            for sub in subtitle_streams:
+                if sub["index"] in keep_indices:
+                    title = sub.get("title", f"字幕 {sub_idx}")
+                    cmd.extend([f"-metadata:s:s:{sub_idx}", f"title={title}"])
+                    sub_idx += 1
+        
+        cmd.append(str(output_path))
+        
+        logger.info(f"[删除字幕] 开始: {full_path.name}, 保留轨道: {keep_indices if keep_indices else '无'}")
+        logger.info(f"[删除字幕] FFmpeg 命令: {' '.join(cmd)}")
+        
+        # 执行 FFmpeg
+        result = subprocess.run(cmd, capture_output=True, timeout=300)
+        
+        if result.returncode != 0:
+            error_msg = result.stderr.decode()[-500:]
+            logger.error(f"[删除字幕] 失败: {error_msg}")
+            raise Exception(f"FFmpeg 执行失败: {error_msg}")
+        
+        logger.info(f"[删除字幕] 完成: {output_path}")
+        
+        return {
+            "success": True,
+            "output_path": str(output_path.relative_to(MEDIA_ROOT)),
+            "output_filename": output_filename,
+            "original_subtitle_count": len(subtitle_streams),
+            "kept_subtitle_count": len(keep_indices),
+            "removed_subtitle_count": len(subtitle_streams) - len(keep_indices)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[删除字幕] 失败: {e}")
+        raise HTTPException(500, f"删除字幕失败: {str(e)}")
 
 @app.get("/api/media/preview-stream")
 async def preview_stream_media(
