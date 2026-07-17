@@ -1081,6 +1081,11 @@ function parseSubtitle() {
   } else if (state.subtitleType === 'ass') {
     parseASS();
   }
+  
+  console.log(`[subtitle] Parsed ${state.parsedSubtitles.length} subtitles (${state.subtitleType})`);
+  if (state.parsedSubtitles.length > 0) {
+    console.log('[subtitle] First subtitle:', state.parsedSubtitles[0]);
+  }
 }
 
 // 解析 SRT
@@ -1128,50 +1133,136 @@ function parseASS() {
   const lines = state.subtitleContent.split('\n');
   let inEvents = false;
   let format = [];
+  let formatFieldCount = 0;
   
-  lines.forEach(line => {
-    line = line.trim();
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
     
-    if (line === '[Events]') {
-      inEvents = true;
-      return;
+    // 跳过空行和注释
+    if (!line || line.startsWith(';')) continue;
+    
+    // 检测段落
+    if (line.startsWith('[')) {
+      inEvents = (line.toLowerCase() === '[events]');
+      continue;
     }
     
-    if (line.startsWith('[') && line !== '[Events]') {
-      inEvents = false;
-      return;
+    if (!inEvents) continue;
+    
+    // 解析 Format 行
+    if (line.startsWith('Format:')) {
+      format = line.substring(7).split(',').map(s => s.trim());
+      formatFieldCount = format.length;
+      continue;
     }
     
-    if (inEvents && line.startsWith('Format:')) {
-      format = line.replace('Format:', '').split(',').map(s => s.trim());
-      return;
-    }
-    
-    if (inEvents && line.startsWith('Dialogue:')) {
-      const parts = line.replace('Dialogue:', '').split(',');
-      const textIndex = format.indexOf('Text');
+    // 解析 Dialogue 行
+    if (line.startsWith('Dialogue:')) {
+      const dialogueContent = line.substring(9);
+      
+      // ASS 格式：Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+      // Text 字段可以包含逗号，所以需要特殊处理
+      const parts = [];
+      let current = '';
+      let commaCount = 0;
+      
+      for (let j = 0; j < dialogueContent.length; j++) {
+        if (dialogueContent[j] === ',' && commaCount < formatFieldCount - 1) {
+          parts.push(current);
+          current = '';
+          commaCount++;
+        } else {
+          current += dialogueContent[j];
+        }
+      }
+      parts.push(current); // 添加最后一个部分（Text字段）
+      
+      if (format.length === 0) {
+        // 如果没有 Format 行，使用默认 ASS 格式
+        format = ['Layer', 'Start', 'End', 'Style', 'Name', 'MarginL', 'MarginR', 'MarginV', 'Effect', 'Text'];
+        formatFieldCount = format.length;
+      }
+      
       const startIndex = format.indexOf('Start');
       const endIndex = format.indexOf('End');
+      const textIndex = format.indexOf('Text');
+      const styleIndex = format.indexOf('Style');
       
-      if (startIndex === -1 || endIndex === -1 || textIndex === -1) return;
+      if (startIndex === -1 || endIndex === -1 || textIndex === -1) continue;
       
       const start = parseASSTime(parts[startIndex]?.trim());
       const end = parseASSTime(parts[endIndex]?.trim());
-      let text = parts.slice(textIndex).join(',').trim();
       
-      text = text.replace(/\{[^}]*\}/g, '').replace(/\\N/g, '\n').replace(/\\n/g, '\n');
+      // 获取文本（可能是最后一个字段）
+      let text = parts[textIndex] || '';
+      // 如果文本字段后面还有内容（因为逗号分割问题），合并它们
+      if (textIndex < parts.length - 1) {
+        text = parts.slice(textIndex).join(',');
+      }
+      text = text.trim();
       
-      state.parsedSubtitles.push({ start, end, text });
+      // 处理 ASS 特殊标签
+      text = text.replace(/\{[^}]*\}/g, '');  // 移除所有样式标签
+      text = text.replace(/\\N/g, '\n');       // 换行符
+      text = text.replace(/\\n/g, '\n');       // 换行符
+      text = text.replace(/\\h/g, ' ');        // 空格
+      
+      // 获取样式信息（可选，用于未来扩展）
+      const style = styleIndex >= 0 ? parts[styleIndex]?.trim() : 'Default';
+      
+      // 跳过空文本和注释样式
+      if (!text || style.startsWith('comment')) continue;
+      
+      // 跳过特效字幕（如卡拉OK）
+      if (text.match(/^\{\\[kK]\d+\}/)) continue;
+      
+      state.parsedSubtitles.push({ 
+        start, 
+        end, 
+        text,
+        style 
+      });
     }
-  });
+  }
 }
 
 // 解析 ASS 时间
+// ASS 时间格式: H:MM:SS.CC (centiseconds, 1/100秒)
+// 也支持: HH:MM:SS.CCC (milliseconds)
 function parseASSTime(timeStr) {
   if (!timeStr) return 0;
-  const match = timeStr.match(/(\d+):(\d{2}):(\d{2})[.](\d{2})/);
-  if (!match) return 0;
-  return parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 100;
+  
+  // 标准 ASS 格式: H:MM:SS.CC 或 HH:MM:SS.CC
+  const match1 = timeStr.match(/(\d+):(\d{2}):(\d{2})[.](\d{2})/);
+  if (match1) {
+    const hours = parseInt(match1[1]);
+    const minutes = parseInt(match1[2]);
+    const seconds = parseInt(match1[3]);
+    const centiseconds = parseInt(match1[4]);
+    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
+  }
+  
+  // 毫秒格式: H:MM:SS.CCC 或 HH:MM:SS.CCC
+  const match2 = timeStr.match(/(\d+):(\d{2}):(\d{2})[.](\d{3})/);
+  if (match2) {
+    const hours = parseInt(match2[1]);
+    const minutes = parseInt(match2[2]);
+    const seconds = parseInt(match2[3]);
+    const milliseconds = parseInt(match2[4]);
+    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
+  }
+  
+  // 逗号分隔格式: H:MM:SS,CC
+  const match3 = timeStr.match(/(\d+):(\d{2}):(\d{2})[,](\d{2})/);
+  if (match3) {
+    const hours = parseInt(match3[1]);
+    const minutes = parseInt(match3[2]);
+    const seconds = parseInt(match3[3]);
+    const centiseconds = parseInt(match3[4]);
+    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
+  }
+  
+  return 0;
 }
 
 // 更新字幕显示
