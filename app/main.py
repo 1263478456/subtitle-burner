@@ -364,7 +364,9 @@ def require_auth(request: Request):
 async def run_burn_task(task_id):
     task = tasks.get(task_id)
     if not task:
+        logger.warning(f"[队列工作者] 任务 {task_id} 不在内存中，跳过")
         return
+    logger.info(f"[队列工作者] 开始处理任务: {task_id}, 视频: {task.get('video_name')}")
     try:
         tasks[task_id]["status"] = "processing"
         tasks[task_id]["progress"] = 0
@@ -470,16 +472,19 @@ async def run_burn_task(task_id):
                    ("failed", str(e), datetime.now().isoformat(), task_id))
 
 async def queue_worker():
+    logger.info(f"[队列工作者] 启动，并发数: {MAX_CONCURRENT}")
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
     async def process_one(task_id):
         async with semaphore:
+            logger.info(f"[队列工作者] 获取信号量，处理任务: {task_id}")
             await run_burn_task(task_id)
     while True:
         try:
             task_id = await queue.get()
+            logger.info(f"[队列工作者] 从队列获取任务: {task_id}，当前队列大小: {queue.qsize()}")
             asyncio.create_task(process_one(task_id))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[队列工作者] 错误: {e}")
 
 @asynccontextmanager
 async def lifespan(app):
@@ -1468,8 +1473,10 @@ async def clear_history(user: str = Depends(require_auth)):
 @app.post("/api/retry-all-failed")
 async def retry_all_failed(user: str = Depends(require_auth)):
     """重试所有失败的任务"""
+    logger.info(f"[批量重试] 用户 {user} 请求重试所有失败任务")
     failed_tasks = db_query("SELECT * FROM tasks WHERE user=? AND status='failed'", (user,))
     if not failed_tasks:
+        logger.info("[批量重试] 没有失败的任务")
         return {"message": "没有失败的任务", "count": 0}
     
     count = 0
@@ -1498,8 +1505,19 @@ async def retry_all_failed(user: str = Depends(require_auth)):
             "created_at": now,
             "error": None
         }
+        logger.info(f"[批量重试] 已准备任务: {task_id} ({r['video_name']})，输入文件检查...")
+        
+        # 检查输入文件是否存在
+        video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
+        sub_files = list(INPUT_DIR.glob(f"{task_id}_subtitle.*"))
+        if not video_files or not sub_files:
+            logger.warning(f"[批量重试] 任务 {task_id} 输入文件不存在，跳过")
+            continue
+        
+        logger.info(f"[批量重试] 任务 {task_id} 输入文件存在，加入队列")
         await queue.put(task_id)
         count += 1
+    logger.info(f"[批量重试] 完成，共重试 {count} 个任务，队列大小: {queue.qsize()}")
     return {"message": f"已重试 {count} 个任务", "count": count}
 
 @app.post("/api/delete-completed")
