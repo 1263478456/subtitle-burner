@@ -515,14 +515,14 @@ class NoCacheFileResponse(_FR):
 # 健康检查（容器探针）
 @app.get("/health", include_in_schema=False)
 async def container_health():
-    return {"status": "ok", "version": "3.0.97"}
+    return {"status": "ok", "version": "3.0.99"}
 
 @app.get("/api/health")
 async def api_health():
     """API 健康检查，返回详细信息"""
     return {
         "status": "ok",
-        "version": "3.0.97",
+        "version": "3.0.99",
         "ffmpeg": shutil.which("ffmpeg") is not None,
         "queue_size": queue.qsize(),
         "gpu_encoders": [name for name, supported in GPU_ENCODERS.items() if supported]
