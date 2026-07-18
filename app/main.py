@@ -475,7 +475,7 @@ async def run_burn_task(task_id):
             logger.warning(f"[任务 {task_id}] ffprobe 异常: {e}")
             total_duration = 0
 
-        process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
         running_processes[task_id] = process
 
         # 收集 stderr 输出用于错误诊断
@@ -2377,7 +2377,7 @@ async def generate_preview(
         str(output_path)
     ]
     
-    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     _, stderr = await process.communicate()
     
     if process.returncode != 0 or not output_path.exists():
@@ -2492,7 +2492,7 @@ async def transcode_video(
         preset_idx = cmd.index("-preset")
         cmd[preset_idx + 1] = "p4"
     
-    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
     _, stderr = await process.communicate()
     
     if process.returncode != 0 or not output_path.exists():
