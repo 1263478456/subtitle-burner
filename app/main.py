@@ -2032,6 +2032,43 @@ def _prepare_subtitle_for_ffmpeg(sub_path, preview_params):
     
     return temp_sub_path
 
+def _build_ass_partial_style(preview_params):
+    """为 ASS 文件构建 force_style 字符串（只覆盖用户修改的字段）"""
+    if not preview_params:
+        return ""
+    style_parts = []
+    if preview_params.get('fontSize'):
+        style_parts.append(f"FontSize={preview_params['fontSize']}")
+    if preview_params.get('fontFamily'):
+        font_map = {'sans-serif': 'Noto Sans CJK SC', 'serif': 'Noto Serif CJK SC',
+                    'monospace': 'Noto Sans Mono CJK SC', 'Microsoft YaHei': 'Noto Sans CJK SC',
+                    'PingFang SC': 'Noto Sans CJK SC', 'SimHei': 'Noto Sans CJK SC',
+                    'SimSun': 'Noto Serif CJK SC', 'KaiTi': 'Noto Sans CJK SC'}
+        style_parts.append(f"Fontname={font_map.get(preview_params['fontFamily'], preview_params['fontFamily'])}")
+    if preview_params.get('fontColor'):
+        color = preview_params['fontColor']
+        if color.startswith('#') and len(color) == 7:
+            r, g, b = color[1:3], color[3:5], color[5:7]
+            style_parts.append(f"PrimaryColour=&H00{b}{g}{r}&")
+    if preview_params.get('fontWeight'):
+        style_parts.append(f"Bold={1 if preview_params['fontWeight'] == 'bold' else 0}")
+    if preview_params.get('outlineWidth') is not None:
+        style_parts.append(f"Outline={preview_params['outlineWidth']}")
+    if preview_params.get('outlineColor'):
+        color = preview_params['outlineColor']
+        if color.startswith('#') and len(color) == 7:
+            r, g, b = color[1:3], color[3:5], color[5:7]
+            style_parts.append(f"OutlineColour=&H00{b}{g}{r}&")
+    if preview_params.get('shadowOffset') is not None:
+        style_parts.append(f"Shadow={preview_params['shadowOffset']}")
+    if preview_params.get('positionY'):
+        alignment_map = {'bottom': 2, 'top': 8, 'center': 5}
+        style_parts.append(f"Alignment={alignment_map.get(preview_params['positionY'], 2)}")
+    margin_key = 'marginBottom' if preview_params.get('positionY', 'bottom') == 'bottom' else 'marginTop'
+    if preview_params.get(margin_key):
+        style_parts.append(f"MarginV={preview_params[margin_key]}")
+    return ','.join(style_parts)
+
 def _build_subtitle_vf_filter(sub_path, preview_params, style=""):
     """构建字幕滤镜字符串（预览和压制共用此函数）
     
@@ -2045,7 +2082,8 @@ def _build_subtitle_vf_filter(sub_path, preview_params, style=""):
     sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
     vf = f"subtitles='{sub_escaped}'"
     
-    if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
+    if sub_path.suffix.lower() in ['.srt', '.vtt']:
+        # SRT/VTT 没有样式，全量设置
         if style:
             vf += f":force_style='{style}'"
         elif preview_params:
@@ -2053,8 +2091,15 @@ def _build_subtitle_vf_filter(sub_path, preview_params, style=""):
             if ass_style:
                 vf += f":force_style='{ass_style}'"
         else:
-            default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
-            vf += f":force_style='{default_style}'"
+            vf += f":force_style='FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'"
+    elif sub_path.suffix.lower() in ['.ass', '.ssa']:
+        # ASS/SSA 只覆盖用户修改的字段
+        if style:
+            vf += f":force_style='{style}'"
+        elif preview_params:
+            partial = _build_ass_partial_style(preview_params)
+            if partial:
+                vf += f":force_style='{partial}'"
     
     return vf
 
@@ -2301,20 +2346,26 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
     vf_parts = [f"subtitles='{sub_escaped}'"]
     
-    # 构建 ASS 样式字符串
-    if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
+    # 构建 force_style（ASS 只覆盖用户修改的字段，SRT 全量设置）
+    if sub_path.suffix.lower() in ['.srt', '.vtt']:
+        # SRT/VTT 没有样式，需要全量设置
         if style:
-            # 用户自定义样式
             vf_parts[0] += f":force_style='{style}'"
         elif preview_params:
-            # 使用预览参数生成样式
             ass_style = _preview_params_to_ass_style(preview_params)
             if ass_style:
                 vf_parts[0] += f":force_style='{ass_style}'"
         else:
-            # 默认样式
             default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
             vf_parts[0] += f":force_style='{default_style}'"
+    elif sub_path.suffix.lower() in ['.ass', '.ssa']:
+        # ASS/SSA 已有完整样式，只覆盖用户在 UI 中修改的字段
+        if style:
+            vf_parts[0] += f":force_style='{style}'"
+        elif preview_params:
+            partial = _build_ass_partial_style(preview_params)
+            if partial:
+                vf_parts[0] += f":force_style='{partial}'"
     
     # 时间偏移已由 _prepare_subtitle_for_ffmpeg() 处理，此处不再修改文件
     # （_shift_subtitle_time 不应在构建命令时调用，避免重复偏移）
