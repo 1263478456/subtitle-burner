@@ -440,7 +440,7 @@ async def run_burn_task(task_id):
 
         params = task["params"]
         
-        # 准备字幕文件（临时副本，不修改原始文件）
+        # 准备字幕文件（仅处理时间偏移，样式由 force_style 控制）
         preview_params = params.get('preview_params', {})
         temp_sub_path = _prepare_subtitle_for_ffmpeg(sub_path, preview_params)
         
@@ -651,9 +651,8 @@ async def run_burn_task(task_id):
     finally:
         # 清理临时字幕副本（不删除原始文件）
         try:
-            if 'temp_sub_path' in dir() and temp_sub_path:
+            if 'temp_sub_path' in dir() and temp_sub_path and temp_sub_path != sub_path:
                 temp_sub_path.unlink(missing_ok=True)
-                temp_sub_path.parent.rmdir()
         except Exception:
             pass
 
@@ -1988,7 +1987,7 @@ def _detect_encoding(file_path):
         raw = f.read(4)
     # UTF-16 BOM 检测
     if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
-        return 'utf-16'
+        return 'utf-16'  # 使用 utf-16（自动处理 BOM），不要用 utf-16-le
     # UTF-8 BOM
     if raw[:3] == b'\xef\xbb\xbf':
         return 'utf-8-sig'
@@ -2003,31 +2002,33 @@ def _detect_encoding(file_path):
 def _prepare_subtitle_for_ffmpeg(sub_path, preview_params):
     """准备字幕文件用于 FFmpeg 处理（预览和压制共用此函数）
     
-    创建临时副本，应用样式修改和时间偏移，返回临时文件路径。
+    创建临时副本，仅应用时间偏移（样式由 force_style 控制，不修改文件）。
     不修改原始字幕文件。
     
     Args:
         sub_path: 原始字幕文件路径
-        preview_params: 预览参数字典（包含 timeOffset、fontSize 等）
+        preview_params: 预览参数字典（包含 timeOffset）
     Returns:
-        temp_sub_path: 临时字幕文件路径（调用方负责清理）
+        temp_sub_path: 字幕文件路径（有偏移时为临时副本，无偏移时为原始文件）
     """
-    import shutil
-    import tempfile
+    # 无偏移时直接返回原始文件，不做任何修改
+    time_offset = preview_params.get('timeOffset', 0) if preview_params else 0
+    if time_offset == 0:
+        return sub_path
     
-    # 创建临时副本
-    temp_dir = Path(tempfile.mkdtemp(prefix="subtitle_preview_"))
-    temp_sub_path = temp_dir / sub_path.name
+    # 有偏移时创建临时副本
+    import shutil
+    temp_name = f".preview_{uuid.uuid4().hex[:8]}_{sub_path.name}"
+    temp_sub_path = sub_path.parent / temp_name
     shutil.copy2(sub_path, temp_sub_path)
     
-    # 应用 ASS 样式修改
-    if temp_sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
-        _modify_ass_style(temp_sub_path, preview_params)
-    
-    # 应用时间偏移
-    time_offset = preview_params.get('timeOffset', 0) if preview_params else 0
-    if time_offset != 0:
+    try:
         _shift_subtitle_time(temp_sub_path, time_offset)
+        logger.info(f"[预览] 字幕偏移 {time_offset}s，临时文件: {temp_sub_path.name}")
+    except Exception as e:
+        logger.warning(f"[预览] 字幕偏移失败，使用原始文件: {e}")
+        temp_sub_path.unlink(missing_ok=True)
+        return sub_path
     
     return temp_sub_path
 
@@ -2234,7 +2235,7 @@ def _modify_ass_style(ass_path, params):
             with open(ass_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            logger.info(f"[ASS] 修改样式成功: Font={ass_font}, Size={font_color}, Color={font_color}, Position={position_y}")
+            logger.info(f"[ASS] 修改样式成功: Font={ass_font}, Size={font_size}, Color={font_color}, Position={position_y}")
             return True
         
         return False
@@ -2782,8 +2783,8 @@ async def generate_preview(
     finally:
         # 清理临时字幕文件
         try:
-            temp_sub_path.unlink(missing_ok=True)
-            temp_sub_path.parent.rmdir()
+            if temp_sub_path and temp_sub_path != sub_file:
+                temp_sub_path.unlink(missing_ok=True)
         except Exception:
             pass
     
