@@ -455,6 +455,8 @@ async def run_burn_task(task_id):
         async def read_stderr():
             nonlocal process
             current_time = 0.0
+            last_progress_time = time.time()  # 添加进度监控
+            progress_stall_timeout = int(os.getenv("PROGRESS_STALL_TIMEOUT", "600"))  # 默认10分钟无进度则超时
             while True:
                 line = await process.stderr.readline()
                 if not line:
@@ -477,13 +479,24 @@ async def run_burn_task(task_id):
                             progress = min(round((current_time / total_duration) * 100, 2), 99.99)
                             tasks[task_id]["progress"] = progress
                             db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (progress, task_id))
+                            last_progress_time = time.time()  # 更新最后进度时间
                     except (ValueError, IndexError):
                         pass
-
-        stderr_task = asyncio.create_task(read_stderr())
+                # 检查进度是否卡住
+                stall_time = time.time() - last_progress_time
+                if stall_time > progress_stall_timeout:
+                    logger.error(f"[任务 {task_id}] 进度卡住 {stall_time:.0f} 秒，终止 FFmpeg 进程")
+                    try:
+                        process.terminate()
+                        await asyncio.sleep(2)
+                        if process.returncode is None:
+                            process.kill()
+                    except Exception:
+                        pass
+                    break
         
-        # 添加超时保护（默认 4 小时，可通过环境变量配置）
-        ffmpeg_timeout = int(os.getenv("FFMPEG_TIMEOUT", "14400"))  # 4小时
+        # 超时保护：默认 2 小时
+        ffmpeg_timeout = int(os.getenv("FFMPEG_TIMEOUT", "7200"))
         try:
             await asyncio.wait_for(process.wait(), timeout=ffmpeg_timeout)
         except asyncio.TimeoutError:
