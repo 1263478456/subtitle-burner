@@ -349,6 +349,7 @@ input[type="range"]::-webkit-slider-thumb {
     <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('subtitle')">📁 媒体库字幕</button>
     <button class="btn btn-ghost btn-sm" onclick="openQueueModal()">📋 待压制队列</button>
     <button class="btn btn-ghost btn-sm" onclick="openInNewTab()" title="在新标签页打开">↗ 新窗口</button>
+    <button class="btn btn-ghost btn-sm" id="precisePreviewBtn" onclick="generatePrecisePreview()" title="生成与压制完全一致的预览">🔍 精确预览</button>
     <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 添加到队列</button>
   </div>
 </header>
@@ -364,9 +365,6 @@ input[type="range"]::-webkit-slider-thumb {
     <div class="video-wrapper">
       <video id="videoPlayer"></video>
       <div class="subtitle-overlay" id="subtitleOverlay"></div>
-      <div id="ffmpegPreviewLoading" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.75); color:#fff; padding:12px 24px; border-radius:8px; font-size:14px; z-index:100; pointer-events:none;">
-        ⏳ FFmpeg 渲染中...
-      </div>
       <!-- Safe Area Guide -->
       <div class="safe-area-guide" id="safeAreaGuide">
         <div class="safe-area-border">
@@ -1093,9 +1091,6 @@ function updateParams() {
   
   state.currentSubtitleIndex = -1;
   updateSubtitleDisplay();
-  
-  // 参数变化时触发 FFmpeg 预览（所见即所得）
-  scheduleFFmpegPreview();
 }
 
 // 设置偏移量
@@ -1104,25 +1099,30 @@ function setOffset(value) {
   updateParams();
 }
 
-// ===== FFmpeg 预览（所见即所得） =====
-let _ffmpegPreviewTimer = null;
-let _ffmpegPreviewAbort = null;
+// ===== FFmpeg 精确预览 =====
+let _precisePreviewAbort = null;
+let _precisePreviewActive = false;
+let _savedVideoTime = 0;
+let _savedVideoSrc = '';
 
-async function generateFFmpegPreview() {
-  // 需要视频和字幕都已加载
-  if (!state.videoPath || !state.subtitlePath) return;
+async function generatePrecisePreview() {
+  if (!state.videoPath || !state.subtitlePath) {
+    showToast('请先加载视频和字幕', 'error');
+    return;
+  }
   
+  const btn = document.getElementById('precisePreviewBtn');
   const start = Math.max(0, Math.floor(video.currentTime || 0));
-  const duration = 15; // 预览 15 秒
-  
-  // 显示加载状态
-  const overlay = document.getElementById('subtitleOverlay');
-  const loadingDiv = document.getElementById('ffmpegPreviewLoading');
-  if (loadingDiv) loadingDiv.style.display = 'flex';
+  const duration = 10;
   
   // 取消上一次请求
-  if (_ffmpegPreviewAbort) _ffmpegPreviewAbort.abort();
-  _ffmpegPreviewAbort = new AbortController();
+  if (_precisePreviewAbort) _precisePreviewAbort.abort();
+  _precisePreviewAbort = new AbortController();
+  
+  // 按钮状态 + 提示
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中...';
+  showToast('⏳ 正在生成精确预览（约 6 秒）...', 'info');
   
   try {
     const fd = new FormData();
@@ -1132,64 +1132,78 @@ async function generateFFmpegPreview() {
     fd.append('duration', duration);
     fd.append('preview_params', JSON.stringify(state.params));
     
-    const resp = await fetch('/api/generate-preview', {
+    const resp = await fetch('/api/preview', {
       method: 'POST',
       body: fd,
-      signal: _ffmpegPreviewAbort.signal
+      signal: _precisePreviewAbort.signal
     });
     
     if (!resp.ok) {
       const err = await resp.text();
-      console.error('[FFmpeg预览] 失败:', err);
+      showToast('❌ 预览生成失败: ' + err.slice(0, 100), 'error');
       return;
     }
     
     const data = await resp.json();
     
-    // 保存当前播放位置
-    const wasPlaying = !video.paused;
-    const savedTime = video.currentTime;
+    // 保存当前状态
+    _savedVideoTime = video.currentTime;
+    _savedVideoSrc = video.src;
+    _precisePreviewActive = true;
     
-    // 替换视频源为 FFmpeg 预览
+    // 隐藏 JS 字幕叠加（字幕已烧入预览视频）
+    const overlay = document.getElementById('subtitleOverlay');
+    if (overlay) overlay.style.display = 'none';
+    
+    // 替换视频源为精确预览
+    const wasPlaying = !video.paused;
     video.src = data.preview_url;
     video.load();
-    
     video.onloadeddata = () => {
-      video.currentTime = 0; // 预览视频从头开始
+      video.currentTime = 0;
       if (wasPlaying) video.play();
       video.onloadeddata = null;
     };
     
-    // 隐藏客户端字幕叠加（字幕已烧入预览视频）
-    if (overlay) overlay.style.display = 'none';
-    state._ffmpegPreviewActive = true;
+    showToast('✅ 精确预览已就绪', 'success');
     
-    console.log(`[FFmpeg预览] 成功: ${data.preview_url}, 片段: ${start}s-${start+duration}s`);
+    // 监听播放结束，自动切回 JS 预览
+    video.addEventListener('ended', _onPrecisePreviewEnded);
     
   } catch (e) {
     if (e.name !== 'AbortError') {
-      console.error('[FFmpeg预览] 错误:', e);
+      console.error('[精确预览] 错误:', e);
+      showToast('❌ 预览生成失败', 'error');
     }
   } finally {
-    if (loadingDiv) loadingDiv.style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = '🔍 精确预览';
   }
 }
 
-// 防抖触发 FFmpeg 预览（参数变化后 800ms 才执行）
-function scheduleFFmpegPreview() {
-  if (_ffmpegPreviewTimer) clearTimeout(_ffmpegPreviewTimer);
-  _ffmpegPreviewTimer = setTimeout(generateFFmpegPreview, 800);
+function _onPrecisePreviewEnded() {
+  video.removeEventListener('ended', _onPrecisePreviewEnded);
+  // 恢复 JS 预览，从精确预览结束的位置继续
+  _restoreAfterPrecisePreview();
 }
 
-// 恢复客户端预览模式（切换视频/字幕时调用）
-function restoreClientPreview() {
-  state._ffmpegPreviewActive = false;
+function _restoreAfterPrecisePreview() {
+  _precisePreviewActive = false;
   const overlay = document.getElementById('subtitleOverlay');
   if (overlay) overlay.style.display = '';
-  // 重新加载原始视频
+  
+  // 恢复原始视频源
   if (state.videoPath) {
     const videoUrl = '/api/media/stream?path=' + encodeURIComponent(state.videoPath);
     video.src = videoUrl;
+    video.load();
+    video.onloadeddata = () => {
+      // 跳到精确预览结束的位置
+      const seekTime = _savedVideoTime + 10;
+      video.currentTime = seekTime < (video.duration || Infinity) ? seekTime : _savedVideoTime;
+      video.play();
+      video.onloadeddata = null;
+    };
   }
 }
 
@@ -1770,8 +1784,8 @@ function parseASSTime(timeStr) {
 
 // 更新字幕显示
 function updateSubtitleDisplay() {
-  // FFmpeg 预览模式下，字幕已烧入视频，跳过客户端渲染
-  if (state._ffmpegPreviewActive) return;
+  // 精确预览模式下，字幕已烧入视频，跳过客户端渲染
+  if (_precisePreviewActive) return;
   
   const currentTime = video.currentTime + state.params.timeOffset;
   

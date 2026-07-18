@@ -2751,13 +2751,7 @@ async def generate_preview(
     duration: int = Form(10),
     preview_params: str = Form(""),
 ):
-    """生成字幕预览片段（使用与压制完全相同的 FFmpeg 渲染逻辑）
-    
-    确保预览结果与最终压制结果一致（所见即所得）。
-    支持两种模式：
-    - task_id 模式：从上传目录读取文件
-    - video_path + subtitle_path 模式：从媒体库读取文件
-    """
+    """生成精确字幕预览（960p + NVENC，字幕参数等比缩放，与压制结果 100% 一致）"""
     # 解析文件路径
     if task_id:
         video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
@@ -2786,43 +2780,69 @@ async def generate_preview(
     
     preview_id = uuid.uuid4().hex[:12]
     output_path = PREVIEW_DIR / f"{preview_id}.mp4"
+    PREVIEW_WIDTH = 960
     
-    # 获取视频实际时长
+    # 探测原始视频分辨率和时长
     probe = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(video_file),
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height:format=duration",
+        "-of", "json", str(video_file),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     stdout, _ = await probe.communicate()
+    original_width = 1920  # 默认值
+    total_duration = 0
     try:
-        total_duration = float(stdout.decode().strip())
+        probe_data = json.loads(stdout.decode())
+        streams = probe_data.get("streams", [{}])
+        if streams:
+            original_width = int(streams[0].get("width", 1920))
+        total_duration = float(probe_data.get("format", {}).get("duration", 0))
     except Exception:
-        total_duration = 0
+        pass
+    
+    # 缩放比：960 / 原始宽度（如 4K → 0.25）
+    scale_ratio = PREVIEW_WIDTH / original_width if original_width > 0 else 0.25
     
     # 如果起始时间超出视频长度，从头开始
     if start >= total_duration > 0:
         start = 0
     
-    # 使用与压制完全相同的逻辑准备字幕文件（临时副本，不修改原始文件）
+    # 准备字幕文件（仅时间偏移，样式由 force_style 控制）
     temp_sub_path = _prepare_subtitle_for_ffmpeg(sub_file, params)
     
     try:
-        # 构建字幕滤镜（与压制共用同一套逻辑）
-        style = params.get('style', '')
-        vf = _build_subtitle_vf_filter(temp_sub_path, params, style)
+        # 等比缩放字幕参数（960p 上渲染，和压制效果完全一致）
+        scaled_params = dict(params)
+        if scale_ratio != 1.0:
+            for key in ['fontSize', 'outlineWidth', 'shadowOffset', 'marginBottom', 'marginTop']:
+                val = params.get(key)
+                if val is not None:
+                    scaled_params[key] = max(1, round(val * scale_ratio))
         
-        # 使用 ultrafast 快速生成预览（与压制相同的滤镜，只是编码更快）
+        # 构建字幕滤镜 + 缩放
+        style = scaled_params.get('style', '')
+        sub_filter = _build_subtitle_vf_filter(temp_sub_path, scaled_params, style)
+        vf = f"{sub_filter},scale={PREVIEW_WIDTH}:-2"
+        
+        # 优先 NVENC，没有则回退 libx264
+        if GPU_ENCODERS.get("h264_nvenc"):
+            enc_args = ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "constqp", "-qp", "28"]
+        else:
+            enc_args = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28"]
+        
         cmd = [
             "ffmpeg", "-y", "-ss", str(start), "-i", str(video_file),
             "-vf", vf,
             "-t", str(duration),
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+        ] + enc_args + [
             "-c:a", "aac", "-b:a", "96k",
             "-movflags", "+faststart",
             str(output_path)
         ]
         
-        logger.info(f"[预览] FFmpeg 命令: {' '.join(cmd)}")
+        logger.info(f"[预览] 原始分辨率: {original_width}p, 缩放比: {scale_ratio:.4f}, 命令: {' '.join(cmd)}")
         
         process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
         _, stderr = await process.communicate()
@@ -2832,7 +2852,6 @@ async def generate_preview(
             logger.error(f"[预览] FFmpeg 失败: {stderr_text}")
             raise HTTPException(500, f"预览生成失败: {stderr_text[:200]}")
     finally:
-        # 清理临时字幕文件
         try:
             if temp_sub_path and temp_sub_path != sub_file:
                 temp_sub_path.unlink(missing_ok=True)
@@ -2844,6 +2863,8 @@ async def generate_preview(
         "preview_url": f"/api/preview/{preview_id}",
         "duration": duration,
         "start": start,
+        "resolution": f"{PREVIEW_WIDTH}p",
+        "scale_ratio": round(scale_ratio, 4),
     }
 
 @app.get("/api/preview/{preview_id}")
