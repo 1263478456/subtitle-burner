@@ -523,10 +523,12 @@ async def run_burn_task(task_id):
                                 h, m, s = parts
                                 s = float(s)
                                 current_time = float(h) * 3600 + float(m) * 60 + s
-                                progress = min(round((current_time / total_duration) * 100, 2), 99.99)
-                                tasks[task_id]["progress"] = progress
-                                db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (progress, task_id))
-                                last_progress_time = time.time()
+                                new_progress = min(round((current_time / total_duration) * 100, 2), 99.99)
+                                # 只往高了更新，不回退
+                                if new_progress > tasks[task_id].get("progress", 0):
+                                    tasks[task_id]["progress"] = new_progress
+                                    db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (new_progress, task_id))
+                                    last_progress_time = time.time()
                         except (ValueError, IndexError):
                             pass
                 # 保留最后 50 行
