@@ -25,18 +25,17 @@ services:
               driver: nvidia
     environment:
       - TZ=Asia/Shanghai
-      - ADMIN_USERNAME=1263478456
-      - ADMIN_PASSWORD=Lyb123789
-      - SESSION_SECRET=a8f3k2j9d7h5g4c6b1n0m3p8q2w7e5r9
+      # 从 .env 文件读取敏感配置
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - SESSION_SECRET=${SESSION_SECRET}
       - MAX_FILE_SIZE_MB=204800
       - MAX_CONCURRENT_TASKS=4
       - MEDIA_ROOT=/media
-      # 日志配置
-      - LOG_LEVEL=INFO           # 日志级别: DEBUG/INFO/WARNING/ERROR
-      - LOG_ACCESS=false         # 关闭 HTTP 请求日志（轮询噪音）
-      # FFmpeg 超时配置
-      - FFMPEG_TIMEOUT=7200      # FFmpeg 总体超时（秒），默认 2 小时
-      - PROGRESS_STALL_TIMEOUT=600  # 进度卡住超时（秒），默认 10 分钟
+      - LOG_LEVEL=INFO
+      - LOG_ACCESS=false
+      - FFMPEG_TIMEOUT=7200
+      - PROGRESS_STALL_TIMEOUT=600
     image: 1263478456/subtitle-burner:latest-gpu
     ports:
       - '3214:8000'
