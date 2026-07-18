@@ -29,13 +29,38 @@ from app.fonts import get_available_fonts, resolve_font
 
 # 配置日志输出到 stdout（Docker 日志捕获）
 import logging
+
+# 日志级别配置（通过环境变量控制）
+# DEBUG: 最详细 | INFO: 任务信息 | WARNING: 警告 | ERROR: 仅错误
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_ACCESS = os.getenv("LOG_ACCESS", "true").lower() == "true"
+
+# 设置日志级别
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
     format='%(asctime)s [%(levelname)s] %(message)s',
     stream=sys.stdout,
     force=True
 )
 logger = logging.getLogger("subtitle-burner")
+
+# 过滤 uvicorn 访问日志（如果 LOG_ACCESS=false）
+if not LOG_ACCESS:
+    class AccessLogFilter(logging.Filter):
+        def filter(self, record):
+            # 过滤掉 HTTP 请求日志
+            msg = record.getMessage()
+            return not ('"GET ' in msg or '"POST ' in msg or '"DELETE ' in msg)
+    
+    # 应用过滤器到 uvicorn access logger
+    uvicorn_access = logging.getLogger("uvicorn.access")
+    uvicorn_access.addFilter(AccessLogFilter())
+    
+    # 同时过滤 uvicorn 默认日志中的访问信息
+    uvicorn_default = logging.getLogger("uvicorn")
+    uvicorn_default.addFilter(AccessLogFilter())
+
+logger.info(f"日志级别: {LOG_LEVEL}, 访问日志: {'开启' if LOG_ACCESS else '关闭'}")
 
 BASE_DIR = Path("/data")
 MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "/media"))
