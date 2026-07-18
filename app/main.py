@@ -488,6 +488,7 @@ async def run_burn_task(task_id):
             last_progress_time = time.time()
             progress_stall_timeout = int(os.getenv("PROGRESS_STALL_TIMEOUT", "600"))
             buffer = b""
+            logger.info(f"[任务 {task_id}] read_stderr 启动")
             while True:
                 chunk = await process.stderr.read(1024)
                 if not chunk:
@@ -542,6 +543,9 @@ async def run_burn_task(task_id):
                     except Exception:
                         pass
                     break
+        
+        # 启动 stderr 读取任务
+        stderr_task = asyncio.create_task(read_stderr())
         
         # 超时保护：默认 2 小时
         ffmpeg_timeout = int(os.getenv("FFMPEG_TIMEOUT", "7200"))
