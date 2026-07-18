@@ -140,8 +140,9 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ needs.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
-          cache-to: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }},mode=max
+          # 禁用构建缓存，确保每次使用最新代码
+          # cache-from: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }}
+          # cache-to: type=gha,scope=${{ matrix.variant }}-${{ matrix.platform }},mode=max
 
   merge:
     needs: [meta, build]
