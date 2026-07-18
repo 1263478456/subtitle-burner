@@ -509,28 +509,29 @@ async def run_burn_task(task_id):
                     if not line_str:
                         continue
                     stderr_lines.append(line_str)
+                    # 保留最后 50 行
+                    if len(stderr_lines) > 50:
+                        stderr_lines.pop(0)
+                    # 解析 time= 字段（每一行都解析）
+                    if "time=" in line_str and total_duration > 0:
+                        try:
+                            time_part = line_str.split("time=")[1].split(" ")[0].strip()
+                            parts = time_part.split(":")
+                            if len(parts) == 3:
+                                h, m, s = parts
+                                s = float(s)
+                                current_time = float(h) * 3600 + float(m) * 60 + s
+                                progress = min(round((current_time / total_duration) * 100, 2), 99.99)
+                                tasks[task_id]["progress"] = progress
+                                db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (progress, task_id))
+                                last_progress_time = time.time()
+                        except (ValueError, IndexError):
+                            pass
                 # 保留最后 50 行
                 if len(stderr_lines) > 50:
                     stderr_lines.pop(0)
-                # 解析 time= 字段
-                if "time=" in line_str and total_duration > 0:
-                    try:
-                        time_part = line_str.split("time=")[1].split(" ")[0].strip()
-                        # 格式: HH:MM:SS.ms 或 HH:MM:SS
-                        parts = time_part.split(":")
-                        if len(parts) == 3:
-                            h, m, s = parts
-                            s = float(s)
-                            current_time = float(h) * 3600 + float(m) * 60 + s
-                            progress = min(round((current_time / total_duration) * 100, 2), 99.99)
-                            tasks[task_id]["progress"] = progress
-                            db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (progress, task_id))
-                            last_progress_time = time.time()  # 更新最后进度时间
-                    except (ValueError, IndexError):
-                        pass
-                # 检查进度是否卡住
+                # 检查进度是否卡住（在 while 循环外，基于最后更新时间）
                 stall_time = time.time() - last_progress_time
-                if stall_time > progress_stall_timeout:
                     logger.error(f"[任务 {task_id}] 进度卡住 {stall_time:.0f} 秒，终止 FFmpeg 进程")
                     try:
                         process.terminate()
