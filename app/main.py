@@ -1364,11 +1364,21 @@ async def burn_subtitle(user: str = Depends(require_auth),
 
 @app.post("/api/retry/{task_id}")
 async def retry_task(task_id: str, user: str = Depends(require_auth)):
-    if task_id not in tasks:
-        raise HTTPException(404, "任务不存在")
-    task = tasks[task_id]
-    if task.get("user") != user:
-        raise HTTPException(403, "无权访问")
+    # 先查内存，再查数据库（支持容器重启后重试）
+    task = tasks.get(task_id)
+    if not task:
+        rows = db_query("SELECT * FROM tasks WHERE task_id=? AND user=?", (task_id, user))
+        if not rows:
+            raise HTTPException(404, "任务不存在")
+        task = dict(rows[0])
+        if task.get('params'):
+            try: task['params'] = json.loads(task['params'])
+            except: pass
+        # 加载到内存中
+        tasks[task_id] = task
+    else:
+        if task.get("user") != user:
+            raise HTTPException(403, "无权访问")
     if task.get("status") in ("queued", "processing"):
         raise HTTPException(400, "任务已在队列中")
     now = datetime.now().isoformat()
