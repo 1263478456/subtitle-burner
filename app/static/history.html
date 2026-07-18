@@ -253,6 +253,7 @@ const renderTask = (t) => {
 };
 
 const loadStats = async () => {
+  try {
   const r = await fetch('/api/stats'); if (!r.ok) return;
   const s = await r.json();
   $('#s-total').textContent = s.total;
@@ -268,6 +269,7 @@ const loadStats = async () => {
   if (deleteCompletedBtn) {
     deleteCompletedBtn.style.display = (currentStatus === 'completed' && s.completed > 0) ? 'inline-block' : 'none';
   }
+  } catch(e) { console.warn("loadStats error:", e); }
 };
 
 const loadPage = async () => {

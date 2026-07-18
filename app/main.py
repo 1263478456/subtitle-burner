@@ -2303,7 +2303,7 @@ async def generate_preview(
     }
 
 @app.get("/api/preview/{preview_id}")
-async def get_preview(preview_id: str):
+async def get_preview(preview_id: str, user: str = Depends(require_auth)):
     """返回预览视频"""
     file_path = PREVIEW_DIR / f"{preview_id}.mp4"
     if not file_path.exists():
@@ -2429,7 +2429,7 @@ async def transcode_video(
     }
 
 @app.get("/api/transcode/presets")
-async def list_presets():
+async def list_presets(user: str = Depends(require_auth)):
     """列出可用的转码预设"""
     return {"presets": TRANSCODE_PRESETS}
 async def validation_exception_handler(request, exc):
