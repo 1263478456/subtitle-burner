@@ -440,6 +440,11 @@ async def run_burn_task(task_id):
         output_filename = f"{stem}(压制完成).mp4"
         output_path = OUTPUT_DIR / f"{task_id}_{output_filename}"
 
+        # 对于 ASS 文件，直接修改文件样式（比 force_style 更可靠）
+        preview_params = params.get('preview_params', {})
+        if sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
+            _modify_ass_style(sub_path, preview_params)
+        
         sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
         vf_filters = [f"subtitles='{sub_path_escaped}'"]
         params = task["params"]
@@ -1931,6 +1936,99 @@ def _pick_best_encoder(codec="h264"):
             return "hevc_qsv"
     return f"lib{codec}"
 
+def _modify_ass_style(ass_path, params):
+    """修改 ASS 文件的样式定义（直接编辑文件比 force_style 更可靠）"""
+    try:
+        with open(ass_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 检查是否是 ASS/SSA 格式
+        if '[V4+ Styles]' not in content and '[V4 Styles]' not in content:
+            return False
+        
+        # 解析预览参数
+        font_size = params.get('fontSize', 24)
+        font_family = params.get('fontFamily', 'sans-serif')
+        font_color = params.get('fontColor', '#ffffff')
+        font_weight = params.get('fontWeight', 'bold')
+        outline_width = params.get('outlineWidth', 2)
+        outline_color = params.get('outlineColor', '#000000')
+        shadow_offset = params.get('shadowOffset', 2)
+        position_y = params.get('positionY', 'bottom')
+        margin_bottom = params.get('marginBottom', 30)
+        margin_top = params.get('marginTop', 30)
+        
+        # 字体映射
+        font_map = {
+            'sans-serif': 'Noto Sans CJK SC',
+            'serif': 'Noto Serif CJK SC',
+            'monospace': 'Noto Sans Mono CJK SC',
+            'Microsoft YaHei': 'Noto Sans CJK SC',
+            'PingFang SC': 'Noto Sans CJK SC',
+            'SimHei': 'Noto Sans CJK SC',
+            'SimSun': 'Noto Serif CJK SC',
+        }
+        ass_font = font_map.get(font_family, font_family)
+        
+        # 颜色转换 (#RRGGBB -> &HAABBGGRR)
+        def hex_to_ass(hex_color, alpha='00'):
+            if hex_color.startswith('#') and len(hex_color) == 7:
+                r, g, b = hex_color[1:3], hex_color[3:5], hex_color[5:7]
+                return f"&H{alpha}{b}{g}{r}&"
+            return "&H00FFFFFF"
+        
+        ass_font_color = hex_to_ass(font_color)
+        ass_outline_color = hex_to_ass(outline_color)
+        
+        # 对齐方式
+        alignment_map = {'bottom': 2, 'top': 8, 'center': 5}
+        alignment = alignment_map.get(position_y, 2)
+        
+        # 边距
+        margin_v = margin_bottom if position_y == 'bottom' else margin_top
+        
+        # 构建新样式行
+        # ASS 样式格式: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+        new_style = f"Default,{ass_font},{font_size},{ass_font_color},&H000000FF,{ass_outline_color},&H80000000,{1 if font_weight == 'bold' else 0},0,0,0,100,100,0,0,1,{outline_width},{shadow_offset},{alignment},10,10,{margin_v},1"
+        
+        # 替换样式行
+        if '[V4+ Styles]' in content:
+            # 找到 Format 行和 Default 样式行
+            lines = content.split('\n')
+            new_lines = []
+            in_styles = False
+            format_found = False
+            
+            for line in lines:
+                if '[V4+ Styles]' in line:
+                    in_styles = True
+                    new_lines.append(line)
+                elif in_styles and line.startswith('Format:'):
+                    format_found = True
+                    new_lines.append(line)
+                elif in_styles and format_found and line.startswith('Style: Default'):
+                    # 替换 Default 样式
+                    new_lines.append(f'Style: {new_style}')
+                elif in_styles and line.startswith('[') and 'Styles]' not in line:
+                    # 离开样式部分
+                    in_styles = False
+                    new_lines.append(line)
+                else:
+                    new_lines.append(line)
+            
+            content = '\n'.join(new_lines)
+            
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            logger.info(f"[ASS] 修改样式成功: Font={ass_font}, Size={font_color}, Color={font_color}, Position={position_y}")
+            return True
+        
+        return False
+    except Exception as e:
+        logger.warning(f"[ASS] 修改样式失败: {e}")
+        return False
+
 def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     """根据参数智能构建 FFmpeg 命令"""
     codec = params.get("codec", "libx264")
@@ -2004,13 +2102,15 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
             default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
             vf_parts[0] += f":force_style='{default_style}'"
     
+    # 时间偏移：使用 subtitles 滤镜的 ts_offset 参数（偏移字幕，不偏移视频）
+    if time_offset != 0:
+        vf_parts[0] += f":ts_offset={time_offset}"
+        logger.info(f"[FFmpeg] 字幕时间偏移: {time_offset}s (使用 ts_offset)")
+    
     vf = ",".join(vf_parts)
     
-    # 添加时间偏移到输入
-    input_args = ["-y"]
-    if time_offset != 0:
-        input_args.extend(["-itsoffset", str(time_offset)])
-    input_args.extend(["-i", str(video_path)])
+    # 输入参数（不使用 itsoffset）
+    input_args = ["-y", "-i", str(video_path)]
     
     # GPU 编码特殊处理
     # 注意：使用 subtitles 滤镜时不能用 -hwaccel cuda（会导致滤镜失败）
