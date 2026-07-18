@@ -1969,6 +1969,7 @@ def _preview_params_to_ass_style(params):
     # 字体族
     font_family = params.get("fontFamily", "sans-serif")
     font_map = {
+        # 常用中文字体映射（全部映射到 Linux 兼容字体）
         "sans-serif": "Noto Sans CJK SC",
         "serif": "Noto Serif CJK SC",
         "monospace": "Noto Sans Mono CJK SC",
@@ -1977,8 +1978,31 @@ def _preview_params_to_ass_style(params):
         "SimHei": "Noto Sans CJK SC",
         "SimSun": "Noto Serif CJK SC",
         "KaiTi": "Noto Sans CJK SC",
+        "FangSong": "Noto Serif CJK SC",
+        "STSong": "Noto Serif CJK SC",
+        "STHeiti": "Noto Sans CJK SC",
+        # 文泉驿字体
         "WenQuanYi Micro Hei": "WenQuanYi Micro Hei",
-        "WenQuanYi Zen Hei": "WenQuanYi Zen Hei"
+        "WenQuanYi Zen Hei": "WenQuanYi Zen Hei",
+        # Google Noto 字体（直接使用）
+        "Noto Sans CJK SC": "Noto Sans CJK SC",
+        "Noto Sans CJK TC": "Noto Sans CJK TC",
+        "Noto Sans CJK JP": "Noto Sans CJK JP",
+        "Noto Sans CJK KR": "Noto Sans CJK KR",
+        "Noto Serif CJK SC": "Noto Serif CJK SC",
+        "Noto Serif CJK TC": "Noto Serif CJK TC",
+        "Noto Serif CJK JP": "Noto Serif CJK JP",
+        "Noto Serif CJK KR": "Noto Serif CJK KR",
+        # Noto 额外字重
+        "Noto Sans CJK SC Light": "Noto Sans CJK SC Light",
+        "Noto Sans CJK SC Thin": "Noto Sans CJK SC Thin",
+        "Noto Sans CJK SC Medium": "Noto Sans CJK SC Medium",
+        "Noto Sans CJK SC Bold": "Noto Sans CJK SC Bold",
+        # 思源黑体/宋体（Noto CJK 的别名）
+        "Source Han Sans SC": "Noto Sans CJK SC",
+        "Source Han Serif SC": "Noto Serif CJK SC",
+        "Source Han Sans TC": "Noto Sans CJK TC",
+        "Source Han Serif TC": "Noto Serif CJK TC",
     }
     ass_font = font_map.get(font_family, font_family)
     styles.append(f"Fontname={ass_font}")
