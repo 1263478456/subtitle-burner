@@ -21,19 +21,16 @@ ENV PYTHONUNBUFFERED=1 \
 
 # 安装 Python 与运行时依赖 + 中文字体
 # 字体说明：
-#   - fonts-noto-cjk: Google Noto 中日韩无衬线字体（简体+繁体+日韩）
-#   - fonts-noto-cjk-extra: Noto CJK 额外字重（Light/Thin 等）
-#   - fonts-noto-serif-cjk: Google Noto 中日韩衬线字体（宋体风格）
-#   - fonts-noto-serif-cjk-extra: Noto Serif CJK 额外字重
+#   - fonts-noto-cjk: Google Noto 中日韩字体（包含 Sans + Serif + Mono 全系列）
+#   - fonts-noto-cjk-extra: Noto CJK 额外字重（Thin/Light/Medium/Bold 等）
 #   - fonts-wqy-zenhei: 文泉驿正黑（备选，体积小）
 #   - fonts-wqy-microhei: 文泉驿微米黑（备选，体积小）
+# 注意：fonts-noto-cjk 已包含 Noto Sans CJK 和 Noto Serif CJK 全系列
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv ffmpeg ca-certificates tzdata curl tini \
         fonts-noto-cjk \
         fonts-noto-cjk-extra \
-        fonts-noto-serif-cjk \
-        fonts-noto-serif-cjk-extra \
         fonts-wqy-zenhei \
         fonts-wqy-microhei \
  && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
