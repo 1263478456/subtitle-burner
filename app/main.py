@@ -467,7 +467,12 @@ async def run_burn_task(task_id):
             if probe_result.returncode == 0:
                 dur_str = (await probe_result.stdout.read()).decode().strip()
                 total_duration = float(dur_str) if dur_str else 0
-        except Exception:
+                logger.info(f"[任务 {task_id}] 视频时长: {total_duration}秒")
+            else:
+                stderr_out = (await probe_result.stderr.read()).decode().strip()
+                logger.warning(f"[任务 {task_id}] ffprobe 失败: {stderr_out[:200]}")
+        except Exception as e:
+            logger.warning(f"[任务 {task_id}] ffprobe 异常: {e}")
             total_duration = 0
 
         process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
