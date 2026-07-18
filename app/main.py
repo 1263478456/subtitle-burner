@@ -1583,12 +1583,23 @@ async def delete_completed(user: str = Depends(require_auth)):
     count = 0
     for r in completed_tasks:
         task_id = r["task_id"]
+        # 停止正在运行的 FFmpeg 进程（理论上已完成的任务不会有进程，但防御性编程）
+        if task_id in running_processes:
+            process = running_processes[task_id]
+            try:
+                process.terminate()
+                logger.info(f"[删除已完成任务] 已停止任务 {task_id} 的 FFmpeg 进程")
+            except Exception as e:
+                logger.error(f"[删除已完成任务] 停止任务 {task_id} 失败: {e}")
+            running_processes.pop(task_id, None)
+        # 清理文件
         for f in INPUT_DIR.glob(f"{task_id}_*"):
             try: f.unlink()
             except: pass
         for f in OUTPUT_DIR.glob(f"{task_id}_*"):
             try: f.unlink()
             except: pass
+        # 从内存中移除
         if task_id in tasks:
             del tasks[task_id]
         count += 1
