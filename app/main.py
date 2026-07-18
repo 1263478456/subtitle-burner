@@ -560,30 +560,32 @@ async def run_burn_task(task_id):
             # 等待 FFmpeg 开始写入文件
             await asyncio.sleep(5)
             last_size = 0
-            stall_count = 0
+            start_time = time.time()
             while process.returncode is None:
                 try:
                     if output_path.exists():
                         current_size = output_path.stat().st_size
                         if current_size > 0 and current_size != last_size:
-                            # 基于文件大小估算进度（粗略）
-                            # 使用 CRF 编码，输出大小 ≈ 输入大小 * 压缩比
-                            # 简单估算：如果文件在增长，说明在工作
-                            elapsed = time.time() - tasks[task_id].get("_start_time", time.time())
-                            if elapsed > 10:  # 至少运行10秒后才开始估算
-                                # 保守估算：至少显示有进展
-                                current_progress = tasks[task_id].get("progress", 0)
-                                if current_progress < 1:
-                                    tasks[task_id]["progress"] = 1
-                                    db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (1, task_id))
-                                    logger.info(f"[任务 {task_id}] 文件大小: {current_size} bytes, 进度设为1%")
+                            elapsed = time.time() - start_time
+                            current_progress = tasks[task_id].get("progress", 0)
+                            
+                            # 基于时间估算进度
+                            # 使用 FFmpeg 的 speed 参数估算（如果有的话用 1x 速度）
+                            # 保守估算：假设编码速度约为视频时长的 2-5 倍
+                            if total_duration > 0 and elapsed > 5:
+                                # 假设编码速度约 3x（NVENC）
+                                estimated_total_time = total_duration / 3
+                                time_progress = min(round((elapsed / estimated_total_time) * 100, 2), 99.99)
+                                
+                                # 只在进度增加时更新
+                                if time_progress > current_progress:
+                                    tasks[task_id]["progress"] = time_progress
+                                    db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (time_progress, task_id))
+                            
                             last_size = current_size
-                            stall_count = 0
-                        else:
-                            stall_count += 1
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(5)
                 except Exception:
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(5)
         
         tasks[task_id]["_start_time"] = time.time()
         monitor_task = asyncio.create_task(monitor_progress())
