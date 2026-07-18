@@ -485,14 +485,30 @@ async def run_burn_task(task_id):
         async def read_stderr():
             nonlocal process
             current_time = 0.0
-            last_progress_time = time.time()  # 添加进度监控
-            progress_stall_timeout = int(os.getenv("PROGRESS_STALL_TIMEOUT", "600"))  # 默认10分钟无进度则超时
+            last_progress_time = time.time()
+            progress_stall_timeout = int(os.getenv("PROGRESS_STALL_TIMEOUT", "600"))
+            buffer = b""
             while True:
-                line = await process.stderr.readline()
-                if not line:
+                chunk = await process.stderr.read(1024)
+                if not chunk:
                     break
-                line_str = line.decode("utf-8", errors="ignore").strip()
-                stderr_lines.append(line_str)
+                buffer += chunk
+                # FFmpeg 用 \r 分隔进度行，用 \n 分隔普通日志
+                while b"\r" in buffer or b"\n" in buffer:
+                    # 优先按 \r 分割（进度行），其次按 \n 分割
+                    if b"\r" in buffer:
+                        idx = buffer.index(b"\r")
+                        line_bytes = buffer[:idx]
+                        buffer = buffer[idx+1:]
+                    else:
+                        idx = buffer.index(b"\n")
+                        line_bytes = buffer[:idx]
+                        buffer = buffer[idx+1:]
+                    
+                    line_str = line_bytes.decode("utf-8", errors="ignore").strip()
+                    if not line_str:
+                        continue
+                    stderr_lines.append(line_str)
                 # 保留最后 50 行
                 if len(stderr_lines) > 50:
                     stderr_lines.pop(0)
