@@ -434,7 +434,11 @@ async def run_burn_task(task_id):
         try:
             probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
             probe_result = await asyncio.create_subprocess_exec(*probe_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await probe_result.wait()
+            try:
+                await asyncio.wait_for(probe_result.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                probe_result.kill()
+                logger.warning(f"[任务 {task_id}] ffprobe 超时，使用默认时长")
             if probe_result.returncode == 0:
                 dur_str = (await probe_result.stdout.read()).decode().strip()
                 total_duration = float(dur_str) if dur_str else 0
@@ -477,7 +481,20 @@ async def run_burn_task(task_id):
                         pass
 
         stderr_task = asyncio.create_task(read_stderr())
-        await process.wait()
+        
+        # 添加超时保护（默认 4 小时，可通过环境变量配置）
+        ffmpeg_timeout = int(os.getenv("FFMPEG_TIMEOUT", "14400"))  # 4小时
+        try:
+            await asyncio.wait_for(process.wait(), timeout=ffmpeg_timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"[任务 {task_id}] FFmpeg 超时（{ffmpeg_timeout}秒），终止进程")
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                process.kill()
+            raise Exception(f"FFmpeg 编码超时（超过 {ffmpeg_timeout} 秒）")
+        
         stderr_task.cancel()
         running_processes.pop(task_id, None)
 
