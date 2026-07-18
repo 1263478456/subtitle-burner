@@ -74,7 +74,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         except:
             pass
     
-    cmd = ["ffmpeg", "-y"]
+    cmd = ["ffmpeg", "-y", "-nostdin", "-loglevel", "info"]
     
     # 字幕路径转义
     sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
@@ -445,7 +445,7 @@ async def run_burn_task(task_id):
         except Exception:
             total_duration = 0
 
-        process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         running_processes[task_id] = process
 
         # 收集 stderr 输出用于错误诊断
@@ -2319,7 +2319,7 @@ async def generate_preview(
         str(output_path)
     ]
     
-    process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     _, stderr = await process.communicate()
     
     if process.returncode != 0 or not output_path.exists():
@@ -2434,7 +2434,7 @@ async def transcode_video(
         preset_idx = cmd.index("-preset")
         cmd[preset_idx + 1] = "p4"
     
-    process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     _, stderr = await process.communicate()
     
     if process.returncode != 0 or not output_path.exists():
