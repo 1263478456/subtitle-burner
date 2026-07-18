@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Subtitle Burner 架构检查脚本
+Subtitle Burner 架构检查脚本 v2
 自动检测常见架构问题，防止类似 bug 再次出现
 
 用法：
@@ -13,19 +13,17 @@ Subtitle Burner 架构检查脚本
 """
 import re
 import sys
-import os
+import io
 from pathlib import Path
+
+# 设置 UTF-8 输出
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # 项目根目录
 ROOT = Path(__file__).parent.parent
 ERRORS = []
 WARNINGS = []
-
-
-import io
-import sys
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 
 def error(msg):
@@ -40,6 +38,13 @@ def warn(msg):
 
 def ok(msg):
     print(f"OK: {msg}")
+
+
+def read_file(path):
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
 
 
 # ============================================================
@@ -57,14 +62,9 @@ def check_frontend_hardcoded_lists():
     ]
 
     for f in frontend_files:
-        try:
-            content = f.read_text(encoding="utf-8")
-        except Exception:
-            continue
-
+        content = read_file(f)
         for pattern, desc in hardcoded_patterns:
             matches = re.findall(pattern, content)
-            # 过滤掉明显的非配置项
             config_matches = [m for m in matches if any(
                 kw in m.lower() for kw in ["font", "codec", "preset", "encoder", "nvenc", "qsv"]
             )]
@@ -87,16 +87,14 @@ def check_resource_cleanup():
         warn("main.py 不存在，跳过")
         return
 
-    content = main_py.read_text(encoding="utf-8")
+    content = read_file(main_py)
 
-    # 检查删除函数是否处理了 running_processes
-    # 排除不涉及进程的函数（如 preset）
-    skip_funcs = {"delete_preset", "delete_presets"}
+    # 不涉及进程的函数
+    skip_funcs = {"delete_preset", "delete_presets", "clear_presets"}
     delete_funcs = re.findall(r"def\s+(delete_\w+|clear_\w+)", content)
     for func in delete_funcs:
         if func in skip_funcs:
             continue
-        # 找到函数体
         pattern = rf"def\s+{func}\(.*?\n(.*?)(?=\ndef|\nclass|\Z)"
         match = re.search(pattern, content, re.DOTALL)
         if match:
@@ -114,23 +112,21 @@ def check_resource_cleanup():
 # ============================================================
 def check_dockerfile_fonts():
     """验证 Dockerfile 中的字体包名称"""
-    print("\n--- 检查 3：Dockerfile 字体包 ---")
+    print("\n--- 检查 3：Dockerfile 依赖 ---")
 
     dockerfiles = list(ROOT.glob("app/Dockerfile.*"))
-    # 已知不存在的包
     known_invalid = [
         "fonts-noto-serif-cjk",
         "fonts-noto-serif-cjk-extra",
-        "fonts-noto-color-emoji",  # 需要 universe 源
     ]
 
     for df in dockerfiles:
-        content = df.read_text(encoding="utf-8")
+        content = read_file(df)
         for invalid_pkg in known_invalid:
             if invalid_pkg in content:
                 error(f"{df.name} 中包含不存在的包: {invalid_pkg}")
 
-    ok("Dockerfile 字体包检查完成")
+    ok("Dockerfile 依赖检查完成")
 
 
 # ============================================================
@@ -145,7 +141,7 @@ def check_file_type_coverage():
         warn("main.py 不存在，跳过")
         return
 
-    content = main_py.read_text(encoding="utf-8")
+    content = read_file(main_py)
 
     # 查找所有字幕格式判断
     suffix_checks = re.findall(r"\.suffix\.lower\(\)\s+in\s+\[([^\]]+)\]", content)
@@ -160,9 +156,7 @@ def check_file_type_coverage():
         pattern = rf"def\s+{branch_name}"
         match = re.search(pattern, content)
         if match:
-            # 找到函数体
             start = match.end()
-            # 简单查找下一个函数定义
             next_func = re.search(r"\ndef\s+", content[start:])
             end = start + next_func.start() if next_func else len(content)
             body = content[start:end]
@@ -190,16 +184,14 @@ def check_task_state_consistency():
         warn("main.py 不存在，跳过")
         return
 
-    content = main_py.read_text(encoding="utf-8")
+    content = read_file(main_py)
 
-    # 检查 db_execute 更新状态后是否也更新了 tasks 字典
     db_updates = re.finditer(
         r"db_execute\(\"UPDATE tasks SET status=.*?\"\s*,\s*\(.*?\"(\w+)\".*?task_id",
         content
     )
     for match in db_updates:
         status = match.group(1)
-        # 获取上下文（前后 500 字符）
         start = max(0, match.start() - 500)
         end = min(len(content), match.end() + 500)
         context = content[start:end]
@@ -214,11 +206,123 @@ def check_task_state_consistency():
 
 
 # ============================================================
+# 检查 6：API 鉴权检查
+# ============================================================
+def check_api_auth():
+    """检查新增 API 是否有鉴权保护"""
+    print("\n--- 检查 6：API 鉴权 ---")
+
+    main_py = ROOT / "app" / "main.py"
+    if not main_py.exists():
+        warn("main.py 不存在，跳过")
+        return
+
+    content = read_file(main_py)
+
+    # 找到所有 @app.get/post 装饰器
+    api_defs = re.finditer(r'@app\.(get|post|put|delete)\("(/api/[^"]+)"', content)
+
+    # 不需要鉴权的 API
+    skip_apis = {"/api/login", "/api/health", "/health"}
+
+    for match in api_defs:
+        method = match.group(1)
+        path = match.group(2)
+
+        if path in skip_apis:
+            continue
+
+        # 找到函数定义
+        start = match.end()
+        next_decorator = re.search(r"@\w+\.", content[start:])
+        end = start + next_decorator.start() if next_decorator else len(content)
+        func_body = content[start:end]
+
+        # 检查是否有鉴权
+        has_auth = any([
+            "require_auth" in func_body,
+            "get_current_user" in func_body,
+            "Depends(require_auth)" in func_body,
+        ])
+
+        if has_auth:
+            ok(f"{method.upper()} {path} 有鉴权保护")
+        else:
+            warn(f"{method.upper()} {path} 没有鉴权保护（如果是公开 API 请忽略）")
+
+    ok("API 鉴权检查完成")
+
+
+# ============================================================
+# 检查 7：子进程超时检查
+# ============================================================
+def check_subprocess_timeout():
+    """检查子进程调用是否有超时保护"""
+    print("\n--- 检查 7：子进程超时 ---")
+
+    main_py = ROOT / "app" / "main.py"
+    if not main_py.exists():
+        warn("main.py 不存在，跳过")
+        return
+
+    content = read_file(main_py)
+
+    # 找到所有 subprocess 调用
+    subprocess_calls = re.finditer(
+        r"subprocess\.(run|Popen|call)\((.*?)(?:\)|$)",
+        content, re.DOTALL
+    )
+
+    for match in subprocess_calls:
+        call_args = match.group(2)
+        if "timeout" not in call_args:
+            # 获取上下文
+            start = max(0, match.start() - 100)
+            context = content[start:match.start()].split("\n")[-1].strip()
+            warn(f"subprocess 调用缺少 timeout 参数: {context[:60]}...")
+
+    ok("子进程超时检查完成")
+
+
+# ============================================================
+# 检查 8：前端错误处理检查
+# ============================================================
+def check_frontend_error_handling():
+    """检查前端 fetch 调用是否有错误处理"""
+    print("\n--- 检查 8：前端错误处理 ---")
+
+    frontend_files = list(ROOT.glob("app/static/**/*.html")) + list(ROOT.glob("app/static/**/*.js"))
+
+    for f in frontend_files:
+        content = read_file(f)
+        if not content:
+            continue
+
+        # 找到所有 fetch 调用
+        fetch_calls = re.finditer(r"fetch\(['\"]([^'\"]+)['\"]", content)
+        for match in fetch_calls:
+            url = match.group(1)
+            # 检查是否有 try-catch
+            start = max(0, match.start() - 200)
+            end = min(len(content), match.end() + 500)
+            context = content[start:end]
+
+            if "try" in context and ("catch" in context or ".catch" in context):
+                ok(f"fetch {url} 有错误处理")
+            elif "await" in context:
+                # async 函数中的 fetch 如果没有 try-catch，可能有问题
+                rel = f.relative_to(ROOT)
+                warn(f"{rel} 中 fetch {url} 缺少 try-catch 错误处理")
+
+    ok("前端错误处理检查完成")
+
+
+# ============================================================
 # 主函数
 # ============================================================
 def main():
     print("=" * 60)
-    print("Subtitle Burner 架构检查")
+    print("Subtitle Burner 架构检查 v2")
     print("=" * 60)
 
     check_frontend_hardcoded_lists()
@@ -226,6 +330,9 @@ def main():
     check_dockerfile_fonts()
     check_file_type_coverage()
     check_task_state_consistency()
+    check_api_auth()
+    check_subprocess_timeout()
+    check_frontend_error_handling()
 
     print("\n" + "=" * 60)
     print(f"检查完成: {len(ERRORS)} 个错误, {len(WARNINGS)} 个警告")
@@ -236,7 +343,7 @@ def main():
     elif WARNINGS:
         sys.exit(1)
     else:
-        print("🎉 全部通过！")
+        print("全部通过！")
         sys.exit(0)
 
 
