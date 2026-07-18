@@ -364,6 +364,9 @@ input[type="range"]::-webkit-slider-thumb {
     <div class="video-wrapper">
       <video id="videoPlayer"></video>
       <div class="subtitle-overlay" id="subtitleOverlay"></div>
+      <div id="ffmpegPreviewLoading" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.75); color:#fff; padding:12px 24px; border-radius:8px; font-size:14px; z-index:100; pointer-events:none;">
+        ⏳ FFmpeg 渲染中...
+      </div>
       <!-- Safe Area Guide -->
       <div class="safe-area-guide" id="safeAreaGuide">
         <div class="safe-area-border">
@@ -1090,12 +1093,104 @@ function updateParams() {
   
   state.currentSubtitleIndex = -1;
   updateSubtitleDisplay();
+  
+  // 参数变化时触发 FFmpeg 预览（所见即所得）
+  scheduleFFmpegPreview();
 }
 
 // 设置偏移量
 function setOffset(value) {
   document.getElementById('timeOffset').value = value;
   updateParams();
+}
+
+// ===== FFmpeg 预览（所见即所得） =====
+let _ffmpegPreviewTimer = null;
+let _ffmpegPreviewAbort = null;
+
+async function generateFFmpegPreview() {
+  // 需要视频和字幕都已加载
+  if (!state.videoPath || !state.subtitlePath) return;
+  
+  const start = Math.max(0, Math.floor(video.currentTime || 0));
+  const duration = 15; // 预览 15 秒
+  
+  // 显示加载状态
+  const overlay = document.getElementById('subtitleOverlay');
+  const loadingDiv = document.getElementById('ffmpegPreviewLoading');
+  if (loadingDiv) loadingDiv.style.display = 'flex';
+  
+  // 取消上一次请求
+  if (_ffmpegPreviewAbort) _ffmpegPreviewAbort.abort();
+  _ffmpegPreviewAbort = new AbortController();
+  
+  try {
+    const fd = new FormData();
+    fd.append('video_path', state.videoPath);
+    fd.append('subtitle_path', state.subtitlePath);
+    fd.append('start', start);
+    fd.append('duration', duration);
+    fd.append('preview_params', JSON.stringify(state.params));
+    
+    const resp = await fetch('/api/generate-preview', {
+      method: 'POST',
+      body: fd,
+      signal: _ffmpegPreviewAbort.signal
+    });
+    
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.error('[FFmpeg预览] 失败:', err);
+      return;
+    }
+    
+    const data = await resp.json();
+    
+    // 保存当前播放位置
+    const wasPlaying = !video.paused;
+    const savedTime = video.currentTime;
+    
+    // 替换视频源为 FFmpeg 预览
+    video.src = data.preview_url;
+    video.load();
+    
+    video.onloadeddata = () => {
+      video.currentTime = 0; // 预览视频从头开始
+      if (wasPlaying) video.play();
+      video.onloadeddata = null;
+    };
+    
+    // 隐藏客户端字幕叠加（字幕已烧入预览视频）
+    if (overlay) overlay.style.display = 'none';
+    state._ffmpegPreviewActive = true;
+    
+    console.log(`[FFmpeg预览] 成功: ${data.preview_url}, 片段: ${start}s-${start+duration}s`);
+    
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      console.error('[FFmpeg预览] 错误:', e);
+    }
+  } finally {
+    if (loadingDiv) loadingDiv.style.display = 'none';
+  }
+}
+
+// 防抖触发 FFmpeg 预览（参数变化后 800ms 才执行）
+function scheduleFFmpegPreview() {
+  if (_ffmpegPreviewTimer) clearTimeout(_ffmpegPreviewTimer);
+  _ffmpegPreviewTimer = setTimeout(generateFFmpegPreview, 800);
+}
+
+// 恢复客户端预览模式（切换视频/字幕时调用）
+function restoreClientPreview() {
+  state._ffmpegPreviewActive = false;
+  const overlay = document.getElementById('subtitleOverlay');
+  if (overlay) overlay.style.display = '';
+  // 重新加载原始视频
+  if (state.videoPath) {
+    const videoUrl = '/api/media/stream?path=' + encodeURIComponent(state.videoPath);
+    video.src = videoUrl;
+  }
 }
 
 // 视频事件
@@ -1675,6 +1770,9 @@ function parseASSTime(timeStr) {
 
 // 更新字幕显示
 function updateSubtitleDisplay() {
+  // FFmpeg 预览模式下，字幕已烧入视频，跳过客户端渲染
+  if (state._ffmpegPreviewActive) return;
+  
   const currentTime = video.currentTime + state.params.timeOffset;
   
   // 每5秒输出一次调试信息（避免日志太多）

@@ -440,23 +440,15 @@ async def run_burn_task(task_id):
 
         params = task["params"]
         
-        # 对于 ASS 文件，直接修改文件样式（比 force_style 更可靠）
+        # 准备字幕文件（临时副本，不修改原始文件）
         preview_params = params.get('preview_params', {})
-        if sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
-            _modify_ass_style(sub_path, preview_params)
+        temp_sub_path = _prepare_subtitle_for_ffmpeg(sub_path, preview_params)
         
-        sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
-        vf_filters = [f"subtitles='{sub_path_escaped}'"]
-
-        if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
-            style = params.get('style') or 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
-            vf_filters[0] += f":force_style='{style}'"
-
         crf = params.get('crf', 18)
         preset = params.get('preset', 'medium')
         codec = params.get('codec', 'libx264')
 
-        cmd = _build_ffmpeg_cmd(video_path, sub_path, output_path, params)
+        cmd = _build_ffmpeg_cmd(video_path, temp_sub_path, output_path, params)
         logger.info(f"[任务 {task_id}] 编码器: {codec}, FFmpeg 命令: {' '.join(cmd)}")
 
         # 获取视频总时长用于进度计算
@@ -656,6 +648,14 @@ async def run_burn_task(task_id):
         tasks[task_id].update({"status": "failed", "error": str(e), "completed_at": datetime.now().isoformat()})
         db_execute("UPDATE tasks SET status=?, error=?, completed_at=? WHERE task_id=?",
                    ("failed", str(e), datetime.now().isoformat(), task_id))
+    finally:
+        # 清理临时字幕副本（不删除原始文件）
+        try:
+            if 'temp_sub_path' in dir() and temp_sub_path:
+                temp_sub_path.unlink(missing_ok=True)
+                temp_sub_path.parent.rmdir()
+        except Exception:
+            pass
 
 async def queue_worker():
     logger.info(f"[队列工作者] 启动，并发数: {MAX_CONCURRENT}")
@@ -2000,6 +2000,63 @@ def _detect_encoding(file_path):
     except UnicodeDecodeError:
         return 'utf-16-le'
 
+def _prepare_subtitle_for_ffmpeg(sub_path, preview_params):
+    """准备字幕文件用于 FFmpeg 处理（预览和压制共用此函数）
+    
+    创建临时副本，应用样式修改和时间偏移，返回临时文件路径。
+    不修改原始字幕文件。
+    
+    Args:
+        sub_path: 原始字幕文件路径
+        preview_params: 预览参数字典（包含 timeOffset、fontSize 等）
+    Returns:
+        temp_sub_path: 临时字幕文件路径（调用方负责清理）
+    """
+    import shutil
+    import tempfile
+    
+    # 创建临时副本
+    temp_dir = Path(tempfile.mkdtemp(prefix="subtitle_preview_"))
+    temp_sub_path = temp_dir / sub_path.name
+    shutil.copy2(sub_path, temp_sub_path)
+    
+    # 应用 ASS 样式修改
+    if temp_sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
+        _modify_ass_style(temp_sub_path, preview_params)
+    
+    # 应用时间偏移
+    time_offset = preview_params.get('timeOffset', 0) if preview_params else 0
+    if time_offset != 0:
+        _shift_subtitle_time(temp_sub_path, time_offset)
+    
+    return temp_sub_path
+
+def _build_subtitle_vf_filter(sub_path, preview_params, style=""):
+    """构建字幕滤镜字符串（预览和压制共用此函数）
+    
+    Args:
+        sub_path: 字幕文件路径
+        preview_params: 预览参数字典
+        style: 用户自定义样式字符串（优先级最高）
+    Returns:
+        vf_filter: FFmpeg -vf 参数值
+    """
+    sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
+    vf = f"subtitles='{sub_escaped}'"
+    
+    if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
+        if style:
+            vf += f":force_style='{style}'"
+        elif preview_params:
+            ass_style = _preview_params_to_ass_style(preview_params)
+            if ass_style:
+                vf += f":force_style='{ass_style}'"
+        else:
+            default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
+            vf += f":force_style='{default_style}'"
+    
+    return vf
+
 def _shift_subtitle_time(sub_path, offset_seconds):
     """修改字幕文件的时间戳（支持 SRT/ASS/SSA/VTT），正数=延后，负数=提前"""
     if offset_seconds == 0:
@@ -2258,10 +2315,8 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
             default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
             vf_parts[0] += f":force_style='{default_style}'"
     
-    # 时间偏移：直接修改字幕文件时间戳（ts_offset 不是 subtitles 滤镜的有效选项）
-    if time_offset != 0:
-        _shift_subtitle_time(sub_path, time_offset)
-        logger.info(f"[FFmpeg] 字幕时间偏移: {time_offset}s (修改字幕文件时间戳)")
+    # 时间偏移已由 _prepare_subtitle_for_ffmpeg() 处理，此处不再修改文件
+    # （_shift_subtitle_time 不应在构建命令时调用，避免重复偏移）
     
     vf = ",".join(vf_parts)
     
@@ -2637,18 +2692,45 @@ async def get_default_preset(user: str = Depends(require_auth)):
 @app.post("/api/preview")
 async def generate_preview(
     user: str = Depends(require_auth),
-    task_id: str = Form(...),
+    task_id: str = Form(""),
+    video_path: str = Form(""),
+    subtitle_path: str = Form(""),
     start: int = Form(0),
     duration: int = Form(10),
+    preview_params: str = Form(""),
 ):
-    """生成字幕预览片段（10 秒短视频）"""
-    video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
-    sub_files = list(INPUT_DIR.glob(f"{task_id}_subtitle.*"))
-    if not video_files or not sub_files:
-        raise HTTPException(404, "任务文件不存在")
+    """生成字幕预览片段（使用与压制完全相同的 FFmpeg 渲染逻辑）
     
-    video_path = video_files[0]
-    sub_path = sub_files[0]
+    确保预览结果与最终压制结果一致（所见即所得）。
+    支持两种模式：
+    - task_id 模式：从上传目录读取文件
+    - video_path + subtitle_path 模式：从媒体库读取文件
+    """
+    # 解析文件路径
+    if task_id:
+        video_files = list(INPUT_DIR.glob(f"{task_id}_video.*"))
+        sub_files = list(INPUT_DIR.glob(f"{task_id}_subtitle.*"))
+        if not video_files or not sub_files:
+            raise HTTPException(404, "任务文件不存在")
+        video_file = video_files[0]
+        sub_file = sub_files[0]
+    elif video_path and subtitle_path:
+        video_file = MEDIA_ROOT / video_path
+        sub_file = MEDIA_ROOT / subtitle_path
+        if not video_file.exists():
+            raise HTTPException(404, f"视频文件不存在: {video_path}")
+        if not sub_file.exists():
+            raise HTTPException(404, f"字幕文件不存在: {subtitle_path}")
+    else:
+        raise HTTPException(400, "需要提供 task_id 或 video_path + subtitle_path")
+    
+    # 解析预览参数
+    params = {}
+    if preview_params:
+        try:
+            params = json.loads(preview_params) if isinstance(preview_params, str) else preview_params
+        except (json.JSONDecodeError, TypeError):
+            pass
     
     preview_id = uuid.uuid4().hex[:12]
     output_path = PREVIEW_DIR / f"{preview_id}.mp4"
@@ -2656,7 +2738,7 @@ async def generate_preview(
     # 获取视频实际时长
     probe = await asyncio.create_subprocess_exec(
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(video_path),
+        "-of", "default=noprint_wrappers=1:nokey=1", str(video_file),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     stdout, _ = await probe.communicate()
@@ -2669,24 +2751,41 @@ async def generate_preview(
     if start >= total_duration > 0:
         start = 0
     
-    sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
+    # 使用与压制完全相同的逻辑准备字幕文件（临时副本，不修改原始文件）
+    temp_sub_path = _prepare_subtitle_for_ffmpeg(sub_file, params)
     
-    # 使用 ultrafast 快速生成预览
-    cmd = [
-        "ffmpeg", "-y", "-ss", str(start), "-i", str(video_path),
-        "-vf", f"subtitles='{sub_escaped}'",
-        "-t", str(duration),
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-        "-c:a", "aac", "-b:a", "96k",
-        "-movflags", "+faststart",
-        str(output_path)
-    ]
-    
-    process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-    _, stderr = await process.communicate()
-    
-    if process.returncode != 0 or not output_path.exists():
-        raise HTTPException(500, "预览生成失败")
+    try:
+        # 构建字幕滤镜（与压制共用同一套逻辑）
+        style = params.get('style', '')
+        vf = _build_subtitle_vf_filter(temp_sub_path, params, style)
+        
+        # 使用 ultrafast 快速生成预览（与压制相同的滤镜，只是编码更快）
+        cmd = [
+            "ffmpeg", "-y", "-ss", str(start), "-i", str(video_file),
+            "-vf", vf,
+            "-t", str(duration),
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-c:a", "aac", "-b:a", "96k",
+            "-movflags", "+faststart",
+            str(output_path)
+        ]
+        
+        logger.info(f"[预览] FFmpeg 命令: {' '.join(cmd)}")
+        
+        process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        _, stderr = await process.communicate()
+        
+        if process.returncode != 0 or not output_path.exists():
+            stderr_text = stderr.decode(errors='ignore')[-500:] if stderr else ""
+            logger.error(f"[预览] FFmpeg 失败: {stderr_text}")
+            raise HTTPException(500, f"预览生成失败: {stderr_text[:200]}")
+    finally:
+        # 清理临时字幕文件
+        try:
+            temp_sub_path.unlink(missing_ok=True)
+            temp_sub_path.parent.rmdir()
+        except Exception:
+            pass
     
     return {
         "preview_id": preview_id,
