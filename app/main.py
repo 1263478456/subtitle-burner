@@ -532,6 +532,7 @@ async def run_burn_task(task_id):
                     stderr_lines.pop(0)
                 # 检查进度是否卡住（在 while 循环外，基于最后更新时间）
                 stall_time = time.time() - last_progress_time
+                if stall_time > progress_stall_timeout:
                     logger.error(f"[任务 {task_id}] 进度卡住 {stall_time:.0f} 秒，终止 FFmpeg 进程")
                     try:
                         process.terminate()
