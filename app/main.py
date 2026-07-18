@@ -2432,6 +2432,14 @@ async def transcode_video(
 async def list_presets(user: str = Depends(require_auth)):
     """列出可用的转码预设"""
     return {"presets": TRANSCODE_PRESETS}
+
+# ============================================================
+# 字体 API - 动态返回系统可用字体
+# ============================================================
+@app.get("/api/fonts")
+async def list_fonts():
+    """获取系统可用的中文字体列表（动态检测，单一数据源）"""
+    return {"fonts": get_available_fonts()}
 async def validation_exception_handler(request, exc):
     """全局 422 处理：未登录时改返 401，已登录时返 422 + 详情"""
     auth = request.headers.get("Authorization", "") or request.cookies.get("sb_session", "")
