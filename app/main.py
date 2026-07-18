@@ -805,7 +805,7 @@ async def audio_transcode_media(
             return FileResponse(temp_file, media_type="audio/mp4")
     
     # 构建 FFmpeg 命令 - 只转码音频
-    cmd = ["ffmpeg", "-y", "-fflags", "+genpts"]
+    cmd = ["ffmpeg", "-y", "-nostdin", "-fflags", "+genpts"]
     
     if start > 0:
         cmd.extend(["-ss", str(start)])
@@ -1086,7 +1086,7 @@ async def remove_subtitles(
         output_path = full_path.parent / output_filename
         
         # 构建 FFmpeg 命令
-        cmd = ["ffmpeg", "-y", "-i", str(full_path)]
+        cmd = ["ffmpeg", "-y", "-nostdin", "-i", str(full_path)]
         
         # 映射视频和音频流
         for idx in video_streams:
@@ -1226,7 +1226,7 @@ async def preview_stream_media(
     # - start=0：直接转码，不需要 seek
     # - start>0：使用 input seeking（-ss 在 -i 前面），速度快
     #   从 FFmpeg 2.1 开始，转码模式下的 input seeking 也是帧精确的
-    cmd = ["ffmpeg", "-y", "-fflags", "+genpts"]  # 生成 PTS 保证精度
+    cmd = ["ffmpeg", "-y", "-nostdin", "-fflags", "+genpts"]  # 生成 PTS 保证精度
     
     # 对于 start>0，使用 input seeking（快速）
     if start > 0:
@@ -1890,7 +1890,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     
     # 软字幕模式：添加字幕轨道（不重新编码视频）
     if sub_mode == "soft":
-        cmd = ["ffmpeg", "-y", "-i", str(video_path), "-i", str(sub_path)]
+        cmd = ["ffmpeg", "-y", "-nostdin", "-i", str(video_path), "-i", str(sub_path)]
         
         # 添加时间偏移
         if time_offset != 0:
@@ -2446,7 +2446,7 @@ async def transcode_video(
     vf = ",".join(vf_parts) if vf_parts else None
     
     # 构建命令
-    cmd = ["ffmpeg", "-y", "-i", str(video_path)]
+    cmd = ["ffmpeg", "-y", "-nostdin", "-i", str(video_path)]
     if vf:
         cmd.extend(["-vf", vf])
     cmd.extend([
