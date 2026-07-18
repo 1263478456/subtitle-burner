@@ -545,7 +545,47 @@ async def run_burn_task(task_id):
                     break
         
         # 启动 stderr 读取任务
-        stderr_task = asyncio.create_task(read_stderr())
+        try:
+            stderr_task = asyncio.create_task(read_stderr())
+            logger.info(f"[任务 {task_id}] stderr_task 已创建")
+        except Exception as e:
+            logger.error(f"[任务 {task_id}] stderr_task 创建失败: {e}")
+            stderr_task = None
+        
+        # 独立的进度监控（基于文件大小，不依赖 stderr）
+        async def monitor_progress():
+            if total_duration <= 0 or not output_path:
+                return
+            # 等待 FFmpeg 开始写入文件
+            await asyncio.sleep(5)
+            last_size = 0
+            stall_count = 0
+            while process.returncode is None:
+                try:
+                    if output_path.exists():
+                        current_size = output_path.stat().st_size
+                        if current_size > 0 and current_size != last_size:
+                            # 基于文件大小估算进度（粗略）
+                            # 使用 CRF 编码，输出大小 ≈ 输入大小 * 压缩比
+                            # 简单估算：如果文件在增长，说明在工作
+                            elapsed = time.time() - tasks[task_id].get("_start_time", time.time())
+                            if elapsed > 10:  # 至少运行10秒后才开始估算
+                                # 保守估算：至少显示有进展
+                                current_progress = tasks[task_id].get("progress", 0)
+                                if current_progress < 1:
+                                    tasks[task_id]["progress"] = 1
+                                    db_execute("UPDATE tasks SET progress=? WHERE task_id=?", (1, task_id))
+                                    logger.info(f"[任务 {task_id}] 文件大小: {current_size} bytes, 进度设为1%")
+                            last_size = current_size
+                            stall_count = 0
+                        else:
+                            stall_count += 1
+                    await asyncio.sleep(10)
+                except Exception:
+                    await asyncio.sleep(10)
+        
+        tasks[task_id]["_start_time"] = time.time()
+        monitor_task = asyncio.create_task(monitor_progress())
         
         # 超时保护：默认 2 小时
         ffmpeg_timeout = int(os.getenv("FFMPEG_TIMEOUT", "7200"))
