@@ -109,8 +109,6 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     # 时间偏移
     time_offset = preview_params.get('timeOffset', 0)
     if time_offset and time_offset != 0:
-        # 使用 -itsoffset 参数实现时间偏移（不支持小数点格式的偏移）
-        # 对于字幕，我们通过修改 subtitles 滤镜的 ts_offset 来实现
         logger.info(f"[FFmpeg] 时间偏移: {time_offset}s")
     
     if sub_mode == 'soft':
@@ -1984,10 +1982,120 @@ def _pick_best_encoder(codec="h264"):
             return "hevc_qsv"
     return f"lib{codec}"
 
+def _detect_encoding(file_path):
+    """检测文件编码，支持 UTF-8、UTF-16、UTF-16-LE/BE 等"""
+    with open(file_path, 'rb') as f:
+        raw = f.read(4)
+    # UTF-16 BOM 检测
+    if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+        return 'utf-16'
+    # UTF-8 BOM
+    if raw[:3] == b'\xef\xbb\xbf':
+        return 'utf-8-sig'
+    # 默认尝试 UTF-8，失败回退 UTF-16-LE（Windows 常见）
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            f.read(1024)
+        return 'utf-8'
+    except UnicodeDecodeError:
+        return 'utf-16-le'
+
+def _shift_subtitle_time(sub_path, offset_seconds):
+    """修改字幕文件的时间戳（支持 SRT/ASS/SSA/VTT），正数=延后，负数=提前"""
+    if offset_seconds == 0:
+        return True
+    
+    encoding = _detect_encoding(sub_path)
+    try:
+        with open(sub_path, 'r', encoding=encoding) as f:
+            content = f.read()
+    except Exception as e:
+        logger.warning(f"[字幕偏移] 读取失败: {e}")
+        return False
+    
+    suffix = sub_path.suffix.lower()
+    
+    if suffix in ['.ass', '.ssa']:
+        # ASS 格式: 调整 [V4+ Styles] 中的 Timer 值，或直接偏移 Dialogue 时间
+        # 方法：偏移所有 Dialogue 行的时间戳
+        import re
+        def shift_ass_time(match):
+            h, m, s, cs = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+            total_ms = h * 3600000 + m * 60000 + s * 1000 + cs * 10
+            total_ms += int(offset_seconds * 1000)
+            if total_ms < 0:
+                total_ms = 0
+            nh, nm = divmod(total_ms // 1000, 3600)
+            nm, ns = divmod(nm, 60)
+            ncs = (total_ms % 1000) // 10
+            return f"{nh}:{nm:02d}:{ns:02d}.{ncs:02d}"
+        
+        # 匹配 Dialogue 行的时间戳: Dialogue: 0,0:00:00.00,0:00:05.00,...
+        content = re.sub(
+            r'(Dialogue:\s*\d+,)(\d+):(\d{2}):(\d{2})\.(\d{2}),(\d+):(\d{2}):(\d{2})\.(\d{2})',
+            lambda m: m.group(1) + shift_ass_time(type('obj', (object,), {'group': lambda self, n: m.group(int(n)+1)})()) + ',' + shift_ass_time(type('obj', (object,), {'group': lambda self, n: m.group(int(n)+5)})()),
+            content
+        )
+        # 简化：直接用两个独立替换
+        lines = content.split('\n')
+        new_lines = []
+        time_re = re.compile(r'^Dialogue:\s*\d+,(\d+):(\d{2}):(\d{2})\.(\d{2}),')
+        for line in lines:
+            if line.strip().startswith('Dialogue:'):
+                def replace_time(m):
+                    h, mi, s, cs = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+                    total_ms = h * 3600000 + mi * 60000 + s * 1000 + cs * 10
+                    total_ms += int(offset_seconds * 1000)
+                    if total_ms < 0:
+                        total_ms = 0
+                    nh, nm = divmod(total_ms // 1000, 3600)
+                    nm, ns = divmod(nm, 60)
+                    ncs = (total_ms % 1000) // 10
+                    return f"{nh}:{nm:02d}:{ns:02d}.{ncs:02d},"
+                new_line = time_re.sub(replace_time, line, count=1)
+                # 也替换结束时间（第二个时间戳）
+                parts = new_line.split(',', 3)  # Dialogue: 0,0:00:00.00,0:00:05.00,...
+                if len(parts) >= 3:
+                    # 重新处理第二个时间戳
+                    header = ','.join(parts[:2]) + ','
+                    rest = ','.join(parts[2:])
+                    new_line = header + time_re.sub(replace_time, rest, count=1)
+                new_lines.append(new_line)
+            else:
+                new_lines.append(line)
+        content = '\n'.join(new_lines)
+    
+    elif suffix in ['.srt', '.vtt']:
+        # SRT/VTT 格式: 00:00:00,000 --> 00:00:05,000
+        import re
+        def shift_srt_time(m):
+            h, mi, s, ms = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            total_ms = h * 3600000 + mi * 60000 + s * 1000 + ms
+            total_ms += int(offset_seconds * 1000)
+            if total_ms < 0:
+                total_ms = 0
+            nh, nm = divmod(total_ms // 1000, 3600)
+            nm, ns = divmod(nm, 60)
+            nms = total_ms % 1000
+            return f"{nh:02d}:{nm:02d}:{ns:02d},{nms:03d}"
+        
+        content = re.sub(r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})', shift_srt_time, content)
+    
+    # 写回文件（统一用 UTF-8）
+    try:
+        with open(sub_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        logger.info(f"[字幕偏移] 成功: {offset_seconds}s, 格式: {suffix}")
+        return True
+    except Exception as e:
+        logger.warning(f"[字幕偏移] 写入失败: {e}")
+        return False
+
 def _modify_ass_style(ass_path, params):
     """修改 ASS 文件的样式定义（直接编辑文件比 force_style 更可靠）"""
     try:
-        with open(ass_path, 'r', encoding='utf-8') as f:
+        encoding = _detect_encoding(ass_path)
+        with open(ass_path, 'r', encoding=encoding) as f:
             content = f.read()
         
         # 检查是否是 ASS/SSA 格式
@@ -2150,10 +2258,10 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
             default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
             vf_parts[0] += f":force_style='{default_style}'"
     
-    # 时间偏移：使用 subtitles 滤镜的 ts_offset 参数（偏移字幕，不偏移视频）
+    # 时间偏移：直接修改字幕文件时间戳（ts_offset 不是 subtitles 滤镜的有效选项）
     if time_offset != 0:
-        vf_parts[0] += f":ts_offset={time_offset}"
-        logger.info(f"[FFmpeg] 字幕时间偏移: {time_offset}s (使用 ts_offset)")
+        _shift_subtitle_time(sub_path, time_offset)
+        logger.info(f"[FFmpeg] 字幕时间偏移: {time_offset}s (修改字幕文件时间戳)")
     
     vf = ",".join(vf_parts)
     
