@@ -615,9 +615,37 @@ async def run_burn_task(task_id):
         running_processes.pop(task_id, None)
 
         if process.returncode != 0 or not output_path.exists():
-            # 使用收集的 stderr 输出
-            stderr_output = "\n".join(stderr_lines[-30:])
-            logger.error(f"[任务 {task_id}] FFmpeg 失败 (returncode={process.returncode}):\n{stderr_output}")
+            # 使用收集的 stderr 输出，智能提取真正的错误信息
+            raw_stderr = "\n".join(stderr_lines[-50:])
+            
+            # 过滤掉元数据/信息行，提取真正的错误
+            error_keywords = ["error", "invalid", "no such", "cannot", "failed", "not found", 
+                              "permission denied", "out of memory", "killed", "abort", "fatal",
+                              "unable", "unsupported", "corrupt", "损坏", "失败"]
+            # 元数据特征（key:value 对，FFmpeg 信息行）
+            metadata_patterns = ["com.android", "com.xiaomi", "exifInfo", "manufacturer:", 
+                                 "marketname:", "product.", "videoinfo:", "ai_audio"]
+            
+            error_lines = []
+            for line in stderr_lines[-50:]:
+                line_lower = line.lower()
+                # 跳过元数据行
+                if any(pat in line_lower for pat in metadata_patterns):
+                    continue
+                # 跳过纯进度行
+                if line.startswith("frame=") or line.startswith("size="):
+                    continue
+                # 保留包含错误关键词的行
+                if any(kw in line_lower for kw in error_keywords):
+                    error_lines.append(line)
+            
+            # 如果没找到明确的错误行，取最后几行非空行
+            if not error_lines:
+                error_lines = [l for l in stderr_lines[-10:] if l.strip() and not l.startswith("frame=")]
+            
+            stderr_output = "\n".join(error_lines[-5:]) if error_lines else raw_stderr[-300:]
+            
+            logger.error(f"[任务 {task_id}] FFmpeg 失败 (returncode={process.returncode}):\n{raw_stderr}")
             raise Exception(f"FFmpeg 执行失败 (code={process.returncode}): {stderr_output[:300]}")
 
         out_size = output_path.stat().st_size
@@ -1203,8 +1231,27 @@ async def remove_subtitles(
         result = subprocess.run(cmd, capture_output=True, timeout=300)
         
         if result.returncode != 0:
-            error_msg = result.stderr.decode()[-500:]
-            logger.error(f"[删除字幕] 失败: {error_msg}")
+            raw_stderr = result.stderr.decode(errors="ignore")
+            # 智能提取错误信息，过滤元数据噪音
+            error_keywords = ["error", "invalid", "no such", "cannot", "failed", "not found",
+                              "permission denied", "out of memory", "killed", "abort", "fatal",
+                              "unable", "unsupported", "corrupt"]
+            metadata_patterns = ["com.android", "com.xiaomi", "exifInfo", "manufacturer:",
+                                 "marketname:", "product.", "videoinfo:", "ai_audio"]
+            error_lines = []
+            for line in raw_stderr.split("\n"):
+                line_stripped = line.strip()
+                if not line_stripped:
+                    continue
+                line_lower = line_stripped.lower()
+                if any(pat in line_lower for pat in metadata_patterns):
+                    continue
+                if any(kw in line_lower for kw in error_keywords):
+                    error_lines.append(line_stripped)
+            if not error_lines:
+                error_lines = [l.strip() for l in raw_stderr.split("\n")[-5:] if l.strip()]
+            error_msg = "\n".join(error_lines[-5:])[-500:] if error_lines else raw_stderr[-500:]
+            logger.error(f"[删除字幕] 失败: {raw_stderr}")
             raise Exception(f"FFmpeg 执行失败: {error_msg}")
         
         logger.info(f"[删除字幕] 完成: {output_path}")
