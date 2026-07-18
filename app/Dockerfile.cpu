@@ -19,10 +19,13 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai \
     LANG=C.UTF-8
 
-# 仅安装 Python 与运行时依赖。基础镜像已带 ffmpeg，无需额外 apt-get
+# 安装 Python 与运行时依赖 + 中文字体
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv ffmpeg ca-certificates tzdata curl tini \
+        fonts-noto-cjk \
+        fonts-wqy-zenhei \
+        fonts-wqy-microhei \
  && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
  && echo $TZ > /etc/timezone \
  && rm -rf /var/lib/apt/lists/*

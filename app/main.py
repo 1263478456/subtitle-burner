@@ -136,7 +136,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         vf_filter = f"subtitles='{sub_path_escaped}'"
         
         # SRT/VTT 样式强制设置
-        if sub_path.suffix.lower() in ['.srt', '.vtt']:
+        if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
             # 构建样式字符串
             style_parts = []
             
@@ -417,7 +417,7 @@ async def run_burn_task(task_id):
         vf_filters = [f"subtitles='{sub_path_escaped}'"]
         params = task["params"]
 
-        if sub_path.suffix.lower() in ['.srt', '.vtt']:
+        if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
             style = params.get('style') or 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
             vf_filters[0] += f":force_style='{style}'"
 
@@ -1841,7 +1841,7 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
     vf_parts = [f"subtitles='{sub_escaped}'"]
     
     # 构建 ASS 样式字符串
-    if sub_path.suffix.lower() in ['.srt', '.vtt']:
+    if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
         if style:
             # 用户自定义样式
             vf_parts[0] += f":force_style='{style}'"
@@ -1969,14 +1969,16 @@ def _preview_params_to_ass_style(params):
     # 字体族
     font_family = params.get("fontFamily", "sans-serif")
     font_map = {
-        "sans-serif": "Arial",
-        "serif": "Times New Roman",
-        "monospace": "Courier New",
-        "Microsoft YaHei": "Microsoft YaHei",
-        "PingFang SC": "PingFang SC",
-        "SimHei": "SimHei",
-        "SimSun": "SimSun",
-        "KaiTi": "KaiTi"
+        "sans-serif": "Noto Sans CJK SC",
+        "serif": "Noto Serif CJK SC",
+        "monospace": "Noto Sans Mono CJK SC",
+        "Microsoft YaHei": "Noto Sans CJK SC",
+        "PingFang SC": "Noto Sans CJK SC",
+        "SimHei": "Noto Sans CJK SC",
+        "SimSun": "Noto Serif CJK SC",
+        "KaiTi": "Noto Sans CJK SC",
+        "WenQuanYi Micro Hei": "WenQuanYi Micro Hei",
+        "WenQuanYi Zen Hei": "WenQuanYi Zen Hei"
     }
     ass_font = font_map.get(font_family, font_family)
     styles.append(f"Fontname={ass_font}")
