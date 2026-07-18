@@ -560,14 +560,35 @@ input[type="range"]::-webkit-slider-thumb {
       <div class="form-group">
         <label>字体族</label>
         <select id="fontFamily" onchange="updateParams()">
-          <option value="sans-serif">无衬线（默认）</option>
-          <option value="serif">衬线</option>
-          <option value="monospace">等宽</option>
-          <option value="Microsoft YaHei">微软雅黑</option>
-          <option value="PingFang SC">苹方</option>
-          <option value="SimHei">黑体</option>
-          <option value="SimSun">宋体</option>
-          <option value="KaiTi">楷体</option>
+          <optgroup label="通用字体">
+            <option value="sans-serif">无衬线（默认）</option>
+            <option value="serif">衬线</option>
+            <option value="monospace">等宽</option>
+          </optgroup>
+          <optgroup label="Google Noto 中文简体">
+            <option value="Noto Sans CJK SC">Noto 黑体（推荐）</option>
+            <option value="Noto Sans CJK SC Light">Noto 黑体 Light</option>
+            <option value="Noto Sans CJK SC Medium">Noto 黑体 Medium</option>
+            <option value="Noto Sans CJK SC Bold">Noto 黑体 Bold</option>
+            <option value="Noto Serif CJK SC">Noto 宋体</option>
+            <option value="Noto Serif CJK SC Light">Noto 宋体 Light</option>
+            <option value="Noto Serif CJK SC Bold">Noto 宋体 Bold</option>
+          </optgroup>
+          <optgroup label="Google Noto 中文繁体">
+            <option value="Noto Sans CJK TC">Noto 黑體</option>
+            <option value="Noto Serif CJK TC">Noto 宋體</option>
+          </optgroup>
+          <optgroup label="文泉驿字体">
+            <option value="WenQuanYi Micro Hei">文泉驿微米黑</option>
+            <option value="WenQuanYi Zen Hei">文泉驿正黑</option>
+          </optgroup>
+          <optgroup label="Windows 字体（映射到 Noto）">
+            <option value="Microsoft YaHei">微软雅黑</option>
+            <option value="PingFang SC">苹方</option>
+            <option value="SimHei">黑体</option>
+            <option value="SimSun">宋体</option>
+            <option value="KaiTi">楷体</option>
+          </optgroup>
         </select>
       </div>
       <div class="form-group">
