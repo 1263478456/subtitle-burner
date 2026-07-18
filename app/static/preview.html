@@ -560,35 +560,7 @@ input[type="range"]::-webkit-slider-thumb {
       <div class="form-group">
         <label>字体族</label>
         <select id="fontFamily" onchange="updateParams()">
-          <optgroup label="通用字体">
-            <option value="sans-serif">无衬线（默认）</option>
-            <option value="serif">衬线</option>
-            <option value="monospace">等宽</option>
-          </optgroup>
-          <optgroup label="Google Noto 中文简体">
-            <option value="Noto Sans CJK SC">Noto 黑体（推荐）</option>
-            <option value="Noto Sans CJK SC Light">Noto 黑体 Light</option>
-            <option value="Noto Sans CJK SC Medium">Noto 黑体 Medium</option>
-            <option value="Noto Sans CJK SC Bold">Noto 黑体 Bold</option>
-            <option value="Noto Serif CJK SC">Noto 宋体</option>
-            <option value="Noto Serif CJK SC Light">Noto 宋体 Light</option>
-            <option value="Noto Serif CJK SC Bold">Noto 宋体 Bold</option>
-          </optgroup>
-          <optgroup label="Google Noto 中文繁体">
-            <option value="Noto Sans CJK TC">Noto 黑體</option>
-            <option value="Noto Serif CJK TC">Noto 宋體</option>
-          </optgroup>
-          <optgroup label="文泉驿字体">
-            <option value="WenQuanYi Micro Hei">文泉驿微米黑</option>
-            <option value="WenQuanYi Zen Hei">文泉驿正黑</option>
-          </optgroup>
-          <optgroup label="Windows 字体（映射到 Noto）">
-            <option value="Microsoft YaHei">微软雅黑</option>
-            <option value="PingFang SC">苹方</option>
-            <option value="SimHei">黑体</option>
-            <option value="SimSun">宋体</option>
-            <option value="KaiTi">楷体</option>
-          </optgroup>
+          <option value="sans-serif">加载中...</option>
         </select>
       </div>
       <div class="form-group">
@@ -3301,6 +3273,47 @@ async function startBatchBurn() {
 function openInNewTab() {
   window.open('/preview', '_blank');
 }
+
+// 动态加载字体列表（从 API 获取，单一数据源）
+async function loadFontOptions() {
+  try {
+    const response = await fetch('/api/fonts');
+    if (!response.ok) return;
+    const data = await response.json();
+    const select = document.getElementById('fontFamily');
+    if (!select) return;
+    
+    // 保存当前值
+    const currentValue = select.value || 'sans-serif';
+    
+    // 清空并重建选项
+    select.innerHTML = '';
+    
+    for (const group of data.fonts) {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.category;
+      for (const font of group.fonts) {
+        const option = document.createElement('option');
+        option.value = font;
+        option.textContent = font;
+        optgroup.appendChild(option);
+      }
+      select.appendChild(optgroup);
+    }
+    
+    // 恢复之前的值（如果存在）
+    select.value = currentValue;
+    if (select.value !== currentValue) {
+      // 如果之前的值不存在，选择第一个
+      select.value = select.options[0]?.value || 'sans-serif';
+    }
+  } catch (e) {
+    console.warn('加载字体列表失败:', e);
+  }
+}
+
+// 页面加载时获取字体列表
+document.addEventListener('DOMContentLoaded', loadFontOptions);
 </script>
 </body>
 </html>

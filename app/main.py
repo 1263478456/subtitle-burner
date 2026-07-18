@@ -25,6 +25,7 @@ import aiofiles
 
 # 从 __init__.py 读取版本号
 from app import __version__ as APP_VERSION
+from app.fonts import get_available_fonts, resolve_font
 
 # 配置日志输出到 stdout（Docker 日志捕获）
 import logging
