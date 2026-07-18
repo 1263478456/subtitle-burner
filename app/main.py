@@ -440,6 +440,8 @@ async def run_burn_task(task_id):
         output_filename = f"{stem}(压制完成).mp4"
         output_path = OUTPUT_DIR / f"{task_id}_{output_filename}"
 
+        params = task["params"]
+        
         # 对于 ASS 文件，直接修改文件样式（比 force_style 更可靠）
         preview_params = params.get('preview_params', {})
         if sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
@@ -447,7 +449,6 @@ async def run_burn_task(task_id):
         
         sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
         vf_filters = [f"subtitles='{sub_path_escaped}'"]
-        params = task["params"]
 
         if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
             style = params.get('style') or 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
