@@ -36,7 +36,7 @@ services:
       - LOG_ACCESS=false
       - FFMPEG_TIMEOUT=7200
       - PROGRESS_STALL_TIMEOUT=600
-    image: 1263478456/subtitle-burner:latest-gpu
+    image: ghcr.io/1263478456/subtitle-burner:latest-gpu
     ports:
       - '3214:8000'
     restart: unless-stopped
