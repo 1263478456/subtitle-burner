@@ -1412,6 +1412,7 @@ document.getElementById('subInput').addEventListener('change', (e) => {
     state.subtitlePath = file.name;
     state.subtitleType = detectSubtitleType(file.name);
     parseSubtitle();
+    updateFormatHint();
     document.getElementById('subName').textContent = file.name;
     showToast('字幕已加载: ' + file.name);
   };
@@ -1424,6 +1425,46 @@ function detectSubtitleType(filename) {
   if (ext === 'ass' || ext === 'ssa') return 'ass';
   if (ext === 'vtt') return 'vtt';
   return 'srt';
+}
+
+// 根据字幕格式更新 UI 提示和控件状态
+function updateFormatHint() {
+  const isASS = state.subtitleType === 'ass';
+  const bgOpacityInput = document.getElementById('bgOpacity');
+  const bgOpacityLabel = bgOpacityInput?.closest('.control-group');
+  
+  // bgOpacity 控件：ASS 不支持
+  if (bgOpacityInput) {
+    bgOpacityInput.disabled = isASS;
+    bgOpacityInput.style.opacity = isASS ? '0.4' : '1';
+  }
+  if (bgOpacityLabel) {
+    let hint = bgOpacityLabel.querySelector('.format-hint');
+    if (isASS && !hint) {
+      hint = document.createElement('span');
+      hint.className = 'format-hint';
+      hint.style.cssText = 'font-size:11px; color:#f59e0b; margin-left:4px;';
+      hint.textContent = '⚠️ ASS 不支持';
+      bgOpacityLabel.querySelector('label')?.appendChild(hint);
+    } else if (!isASS && hint) {
+      hint.remove();
+    }
+  }
+  
+  // ASS 整体提示
+  const stylePanel = document.querySelector('.style-panel') || document.querySelector('[class*="style"]');
+  if (stylePanel) {
+    let tip = stylePanel.querySelector('.ass-tip');
+    if (isASS && !tip) {
+      tip = document.createElement('div');
+      tip.className = 'ass-tip';
+      tip.style.cssText = 'background:#1a1a2e; border:1px solid #3b82f6; border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:11px; color:#93c5fd;';
+      tip.innerHTML = '💡 ASS 字幕：仅覆盖您修改的字段，未修改的保留原文件样式';
+      stylePanel.insertBefore(tip, stylePanel.firstChild);
+    } else if (!isASS && tip) {
+      tip.remove();
+    }
+  }
 }
 
 // 解析字幕
@@ -2104,6 +2145,7 @@ async function confirmSelection() {
       console.log('[load] 检测字幕类型:', state.subtitleType);
       
       parseSubtitle();
+      updateFormatHint();
       document.getElementById('subName').textContent = fileName;
       showToast('字幕已加载: ' + fileName);
     } catch (error) {
@@ -2144,6 +2186,7 @@ async function loadEmbeddedSubtitle() {
     
     // 解析字幕
     parseSubtitle();
+    updateFormatHint();
     
     // 更新 UI
     document.getElementById('subName').textContent = data.filename;
