@@ -2780,6 +2780,7 @@ async def generate_preview(
             pass
     
     preview_id = uuid.uuid4().hex[:12]
+    import tempfile
     preview_tmp = Path(tempfile.mkdtemp(prefix="preview_"))
     output_path = preview_tmp / f"{preview_id}.mp4"
     PREVIEW_WIDTH = 960
