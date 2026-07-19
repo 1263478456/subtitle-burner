@@ -109,215 +109,6 @@ def _detect_encoders():
         logger.error(f"FFmpeg 编码器检测失败: {e}")
     return encoders
 
-def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
-    """构建 FFmpeg 命令"""
-    sub_mode = params.get('sub_mode', 'burn')
-    keep_original_sub = params.get('keep_original_sub', False)
-    sub_name = params.get('sub_name', '中文字幕')  # 字幕轨道名称
-    crf = params.get('crf', 18)
-    preset = params.get('preset', 'medium')
-    codec = params.get('codec', 'libx264')
-    
-    # 预览参数（用于字幕样式调整）
-    preview_params = {}
-    if 'preview_params' in params:
-        try:
-            preview_params = json.loads(params['preview_params']) if isinstance(params['preview_params'], str) else params['preview_params']
-        except:
-            pass
-    
-    cmd = ["ffmpeg", "-y", "-nostdin", "-loglevel", "info"]
-    
-    # 字幕路径转义
-    sub_path_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
-    sub_path_posix = str(sub_path).replace("\\", "/")
-    
-    # 时间偏移
-    time_offset = preview_params.get('timeOffset', 0)
-    if time_offset and time_offset != 0:
-        logger.info(f"[FFmpeg] 时间偏移: {time_offset}s")
-    
-    if sub_mode == 'soft':
-        # 软字幕模式：添加字幕轨道
-        cmd.extend(["-i", str(video_path)])
-        
-        # 添加字幕文件作为输入
-        cmd.extend(["-i", str(sub_path_posix)])
-        
-        # 映射流
-        cmd.extend(["-map", "0:v", "-map", "0:a?"])
-        cmd.extend(["-map", "1:0"])  # 添加字幕轨道
-        
-        # 视频编码
-        if codec.startswith('h264_nvenc') or codec.startswith('hevc_nvenc'):
-            cmd.extend(["-c:v", codec])
-            cmd.extend(["-preset", "p5"])
-            cmd.extend(["-rc", "vbr", "-cq", str(crf)])
-        elif codec.startswith('h264_qsv') or codec.startswith('hevc_qsv'):
-            cmd.extend(["-c:v", codec])
-            cmd.extend(["-global_quality", str(crf)])
-        else:
-            cmd.extend(["-c:v", codec])
-            cmd.extend(["-crf", str(crf)])
-            cmd.extend(["-preset", preset])
-        
-        cmd.extend(["-c:a", "copy"])
-        cmd.extend(["-c:s", "mov_text"])  # 字幕编码
-        
-        # 设置字幕轨道名称
-        cmd.extend(["-metadata:s:s:0", f"title={sub_name}"])
-        
-        # 是否保留原字幕
-        if not keep_original_sub:
-            # 只保留新添加的字幕
-            cmd.extend(["-map", "-0:s?"])
-            cmd.extend(["-map", "1:0"])
-        
-    else:
-        # 硬字幕模式：烧录字幕到视频
-        
-        # 添加时间偏移参数
-        if time_offset and time_offset != 0:
-            # 使用 -itsoffset 偏移字幕
-            cmd.extend(["-itsoffset", str(time_offset)])
-        
-        cmd.extend(["-i", str(video_path)])
-        
-        # 构建字幕滤镜
-        vf_filter = f"subtitles='{sub_path_escaped}'"
-        
-        # SRT/VTT 样式强制设置
-        if sub_path.suffix.lower() in ['.srt', '.vtt', '.ass', '.ssa']:
-            # 构建样式字符串
-            style_parts = []
-            
-            if preview_params.get('fontSize'):
-                style_parts.append(f"FontSize={preview_params['fontSize']}")
-            
-            if preview_params.get('fontFamily'):
-                font_map = {
-                    'sans-serif': 'Arial',
-                    'serif': 'Times New Roman',
-                    'monospace': 'Courier New',
-                    'Microsoft YaHei': 'Microsoft YaHei',
-                    'PingFang SC': 'PingFang SC',
-                    'SimHei': 'SimHei',
-                    'SimSun': 'SimSun',
-                    'KaiTi': 'KaiTi',
-                }
-                font_name = font_map.get(preview_params['fontFamily'], 'Arial')
-                style_parts.append(f"FontName={font_name}")
-            
-            if preview_params.get('fontColor'):
-                color = preview_params['fontColor']
-                # 转换 #RRGGBB 为 ASS 颜色格式 &HBBGGRR&
-                if color.startswith('#') and len(color) == 7:
-                    r, g, b = color[1:3], color[3:5], color[5:7]
-                    ass_color = f"&H00{b}{g}{r}&"
-                    style_parts.append(f"PrimaryColour={ass_color}")
-            
-            if preview_params.get('outlineWidth'):
-                style_parts.append(f"Outline={preview_params['outlineWidth']}")
-            
-            if preview_params.get('outlineColor'):
-                color = preview_params['outlineColor']
-                if color.startswith('#') and len(color) == 7:
-                    r, g, b = color[1:3], color[3:5], color[5:7]
-                    ass_color = f"&H00{b}{g}{r}&"
-                    style_parts.append(f"OutlineColour={ass_color}")
-            
-            if preview_params.get('shadowOffset'):
-                style_parts.append(f"Shadow={preview_params['shadowOffset']}")
-            
-            if preview_params.get('fontWeight') == 'bold':
-                style_parts.append("Bold=1")
-            elif preview_params.get('fontWeight') == 'lighter':
-                style_parts.append("Bold=0")
-            
-            # 位置调整
-            if preview_params.get('positionY'):
-                alignment_map = {
-                    'bottom': 2,  # 底部居中
-                    'top': 8,     # 顶部居中
-                    'center': 5,  # 居中
-                }
-                alignment = alignment_map.get(preview_params['positionY'], 2)
-                style_parts.append(f"Alignment={alignment}")
-            
-            if preview_params.get('marginBottom') and preview_params.get('positionY', 'bottom') == 'bottom':
-                style_parts.append(f"MarginV={preview_params['marginBottom']}")
-            elif preview_params.get('marginTop') and preview_params.get('positionY') == 'top':
-                style_parts.append(f"MarginV={preview_params['marginTop']}")
-            
-            if style_parts:
-                style_str = ','.join(style_parts)
-                vf_filter += f":force_style='{style_str}'"
-        
-        # ASS 字幕：如果有预览参数，可能需要覆盖样式
-        elif sub_path.suffix.lower() in ['.ass', '.ssa'] and preview_params:
-            # ASS 字幕已经有完整样式定义，但我们可以通过 ASS 滤镜的 force_style 覆盖部分
-            style_parts = []
-            
-            if preview_params.get('fontSize'):
-                style_parts.append(f"FontSize={preview_params['fontSize']}")
-            
-            if preview_params.get('fontFamily'):
-                font_map = {
-                    'sans-serif': 'Arial',
-                    'serif': 'Times New Roman',
-                    'monospace': 'Courier New',
-                    'Microsoft YaHei': 'Microsoft YaHei',
-                    'PingFang SC': 'PingFang SC',
-                    'SimHei': 'SimHei',
-                    'SimSun': 'SimSun',
-                    'KaiTi': 'KaiTi',
-                }
-                font_name = font_map.get(preview_params['fontFamily'], 'Arial')
-                style_parts.append(f"FontName={font_name}")
-            
-            if preview_params.get('fontColor'):
-                color = preview_params['fontColor']
-                if color.startswith('#') and len(color) == 7:
-                    r, g, b = color[1:3], color[3:5], color[5:7]
-                    ass_color = f"&H00{b}{g}{r}&"
-                    style_parts.append(f"PrimaryColour={ass_color}")
-            
-            if style_parts:
-                style_str = ','.join(style_parts)
-                vf_filter += f":force_style='{style_str}'"
-        
-        cmd.extend(["-vf", vf_filter])
-        
-        # 视频编码
-        if codec.startswith('h264_nvenc') or codec.startswith('hevc_nvenc'):
-            cmd.extend(["-c:v", codec])
-            cmd.extend(["-preset", "p5"])
-            cmd.extend(["-rc", "vbr", "-cq", str(crf)])
-            cmd.extend(["-pix_fmt", "yuv420p"])
-        elif codec.startswith('h264_qsv') or codec.startswith('hevc_qsv'):
-            cmd.extend(["-c:v", codec])
-            cmd.extend(["-global_quality", str(crf)])
-        else:
-            cmd.extend(["-c:v", codec])
-            cmd.extend(["-crf", str(crf)])
-            cmd.extend(["-preset", preset])
-        
-        # 音频：直接复制
-        cmd.extend(["-c:a", "copy"])
-        
-        # 映射流
-        cmd.extend(["-map", "0:v:0", "-map", "0:a?"])
-        
-        # 是否保留原字幕
-        if keep_original_sub:
-            cmd.extend(["-map", "0:s?"])
-    
-    # 输出文件
-    cmd.extend(["-movflags", "+faststart"])
-    cmd.append(str(output_path))
-    
-    return cmd
-
 GPU_ENCODERS = _detect_encoders()
 INPUT_DIR = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
@@ -2391,35 +2182,12 @@ def _build_ffmpeg_cmd(video_path, sub_path, output_path, params):
         cmd.append(str(output_path))
         return cmd
     
-    # 硬字幕模式：压制字幕到画面
-    sub_escaped = str(sub_path).replace(":", r"\:").replace("'", r"\'")
-    vf_parts = [f"subtitles='{sub_escaped}'"]
-    
-    # 构建 force_style（ASS 只覆盖用户修改的字段，SRT 全量设置）
-    if sub_path.suffix.lower() in ['.srt', '.vtt']:
-        # SRT/VTT 没有样式，需要全量设置
-        if style:
-            vf_parts[0] += f":force_style='{style}'"
-        elif preview_params:
-            ass_style = _preview_params_to_ass_style(preview_params)
-            if ass_style:
-                vf_parts[0] += f":force_style='{ass_style}'"
-        else:
-            default_style = 'FontSize=20,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'
-            vf_parts[0] += f":force_style='{default_style}'"
-    elif sub_path.suffix.lower() in ['.ass', '.ssa']:
-        # ASS/SSA 已有完整样式，只覆盖用户在 UI 中修改的字段
-        if style:
-            vf_parts[0] += f":force_style='{style}'"
-        elif preview_params:
-            partial = _build_ass_partial_style(preview_params)
-            if partial:
-                vf_parts[0] += f":force_style='{partial}'"
+    # 硬字幕模式：压制字幕到画面（复用统一函数，确保预览和压制一致）
+    vf_filter = _build_subtitle_vf_filter(sub_path, preview_params, style)
     
     # 时间偏移已由 _prepare_subtitle_for_ffmpeg() 处理，此处不再修改文件
-    # （_shift_subtitle_time 不应在构建命令时调用，避免重复偏移）
     
-    vf = ",".join(vf_parts)
+    vf = vf_filter
     
     # 输入参数（不使用 itsoffset）
     input_args = ["-y", "-i", str(video_path)]
@@ -2854,9 +2622,6 @@ async def generate_preview(
     except Exception:
         pass
     
-    # 缩放比：960 / 原始宽度（如 4K → 0.25）
-    scale_ratio = PREVIEW_WIDTH / original_width if original_width > 0 else 0.25
-    
     # 如果起始时间超出视频长度，从头开始
     if start >= total_duration > 0:
         start = 0
@@ -2865,17 +2630,10 @@ async def generate_preview(
     temp_sub_path = _prepare_subtitle_for_ffmpeg(sub_file, params)
     
     try:
-        # 等比缩放字幕参数（960p 上渲染，和压制效果完全一致）
-        scaled_params = dict(params)
-        if scale_ratio != 1.0:
-            for key in ['fontSize', 'outlineWidth', 'shadowOffset', 'marginBottom', 'marginTop']:
-                val = params.get(key)
-                if val is not None:
-                    scaled_params[key] = max(1, round(val * scale_ratio))
-        
-        # 构建字幕滤镜 + 缩放
-        style = scaled_params.get('style', '')
-        sub_filter = _build_subtitle_vf_filter(temp_sub_path, scaled_params, style)
+        # 字幕在原始分辨率渲染，然后缩放到 960p
+        # 使用原始参数（不缩放），画面缩放时字幕自然跟着缩小
+        style = params.get('style', '')
+        sub_filter = _build_subtitle_vf_filter(temp_sub_path, params, style)
         vf = f"{sub_filter},scale={PREVIEW_WIDTH}:-2"
         
         # 优先 NVENC，没有则回退 libx264
@@ -2894,7 +2652,7 @@ async def generate_preview(
             str(output_path)
         ]
         
-        logger.info(f"[预览] 原始分辨率: {original_width}p, 缩放比: {scale_ratio:.4f}, 命令: {' '.join(cmd)}")
+        logger.info(f"[预览] 原始分辨率: {original_width}p, 输出: {PREVIEW_WIDTH}p, 命令: {' '.join(cmd)}")
         
         process = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
         _, stderr = await process.communicate()
