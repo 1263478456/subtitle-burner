@@ -33,9 +33,8 @@ FONT_ALIASES = {
     "monospace": "Noto Sans Mono CJK SC",
 }
 
-# 字体分类：用于前端下拉菜单分组
+# 字体分类：用于前端下拉菜单分组（只显示容器内实际可用的字体）
 FONT_CATEGORIES = {
-    "通用字体": ["sans-serif", "serif", "monospace"],
     "Google Noto 中文简体": [
         "Noto Sans CJK SC",
         "Noto Sans CJK SC Light",
@@ -52,13 +51,6 @@ FONT_CATEGORIES = {
     "文泉驿字体": [
         "WenQuanYi Micro Hei",
         "WenQuanYi Zen Hei",
-    ],
-    "Windows 字体（自动映射）": [
-        "Microsoft YaHei",
-        "PingFang SC",
-        "SimHei",
-        "SimSun",
-        "KaiTi",
     ],
 }
 
