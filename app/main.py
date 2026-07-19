@@ -70,14 +70,40 @@ MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "/media"))
 import subprocess as _sp
 
 def _detect_encoders():
-    """检测可用的硬件编码器"""
+    """检测可用的硬件编码器（实际测试编码器是否可用，不只是列出）"""
     encoders = {"h264_nvenc": False, "hevc_nvenc": False, "av1_nvenc": False, "h264_qsv": False, "hevc_qsv": False}
     try:
+        # 先检查编码器是否在列表中
         result = _sp.run(["ffmpeg", "-hide_banner", "-encoders"], capture_output=True, timeout=10)
         output = result.stdout.decode("utf-8", errors="ignore")
-        for enc in encoders:
-            if enc in output:
-                encoders[enc] = True
+        listed_encoders = {enc: enc in output for enc in encoders}
+        
+        # 对于 NVENC 编码器，实际测试是否可用（可能编译了支持但没有驱动）
+        for enc in ["h264_nvenc", "hevc_nvenc"]:
+            if listed_encoders.get(enc):
+                try:
+                    # 用 testsrc 生成1帧测试编码器是否真的能用
+                    test_cmd = [
+                        "ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=0.04:size=320x240:rate=25",
+                        "-f", "lavfi", "-i", "sine=frequency=440:duration=0.04",
+                        "-c:v", enc, "-preset", "p1", "-frames:v", "1",
+                        "-c:a", "aac", "-b:a", "32k",
+                        "-f", "null", "-"
+                    ]
+                    test_result = _sp.run(test_cmd, capture_output=True, timeout=10)
+                    if test_result.returncode == 0:
+                        encoders[enc] = True
+                    else:
+                        logger.info(f"[编码器检测] {enc} 列出但不可用: {test_result.stderr.decode()[-200:]}")
+                except Exception as e:
+                    logger.info(f"[编码器检测] {enc} 测试失败: {e}")
+            else:
+                logger.info(f"[编码器检测] {enc} 未列出")
+        
+        # QSV 编码器暂不做运行时测试（需要 display）
+        for enc in ["h264_qsv", "hevc_qsv", "av1_nvenc"]:
+            encoders[enc] = listed_encoders.get(enc, False)
+        
         logger.info(f"FFmpeg 编码器检测结果: {encoders}")
     except Exception as e:
         logger.error(f"FFmpeg 编码器检测失败: {e}")
@@ -1596,9 +1622,31 @@ async def stop_task(task_id: str, user: str = Depends(require_auth)):
 
 @app.get("/api/status/{task_id}")
 async def get_task_status(task_id: str, user: str = Depends(require_auth)):
-    if task_id not in tasks:
+    # 先查内存，再查数据库（支持容器重启后的状态查询）
+    if task_id in tasks:
+        return tasks[task_id]
+    # 内存中没有，查数据库
+    rows = db_query("SELECT * FROM tasks WHERE task_id=? AND user=?", (task_id, user))
+    if not rows:
         raise HTTPException(404, "任务不存在")
-    return tasks[task_id]
+    r = rows[0]
+    task = {
+        "task_id": r["task_id"],
+        "user": r["user"],
+        "video_name": r["video_name"],
+        "subtitle_name": r["subtitle_name"] if "subtitle_name" in r.keys() else "",
+        "status": r["status"],
+        "progress": r["progress"],
+        "params": json.loads(r["params"]) if r["params"] else {},
+        "created_at": r["created_at"],
+        "completed_at": r["completed_at"],
+        "error": r["error"],
+        "output_file": r["output_file"],
+        "output_size": r["output_size"],
+    }
+    # 加载到内存中
+    tasks[task_id] = task
+    return task
 
 @app.get("/api/queue")
 async def get_queue(user: str = Depends(require_auth)):
@@ -2594,6 +2642,21 @@ async def list_presets(user: str = Depends(require_auth)):
         presets.append(preset)
     return {"presets": presets, "total": len(presets)}
 
+@app.get("/api/presets/default")
+async def get_default_preset(user: str = Depends(require_auth)):
+    """获取当前用户的默认预设（必须在 {preset_id} 路由之前定义）"""
+    rows = db_query("SELECT * FROM presets WHERE user=? AND is_default=1", (user,))
+    if not rows:
+        return {"preset": None}
+    
+    preset = dict(rows[0])
+    if preset.get('params'):
+        try:
+            preset['params'] = json.loads(preset['params'])
+        except:
+            pass
+    return {"preset": preset}
+
 @app.get("/api/presets/{preset_id}")
 async def get_preset(preset_id: int, user: str = Depends(require_auth)):
     """获取单个预设详情"""
@@ -2728,20 +2791,6 @@ async def set_default_preset(preset_id: int, user: str = Depends(require_auth)):
     return {"message": "已设为默认预设"}
 
 @app.get("/api/presets/default")
-async def get_default_preset(user: str = Depends(require_auth)):
-    """获取当前用户的默认预设"""
-    rows = db_query("SELECT * FROM presets WHERE user=? AND is_default=1", (user,))
-    if not rows:
-        return {"preset": None}
-    
-    preset = dict(rows[0])
-    if preset.get('params'):
-        try:
-            preset['params'] = json.loads(preset['params'])
-        except:
-            pass
-    return {"preset": preset}
-
 @app.post("/api/preview")
 async def generate_preview(
     user: str = Depends(require_auth),
