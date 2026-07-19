@@ -649,10 +649,10 @@ async def run_burn_task(task_id):
         db_execute("UPDATE tasks SET status=?, error=?, completed_at=? WHERE task_id=?",
                    ("failed", str(e), datetime.now().isoformat(), task_id))
     finally:
-        # 清理临时字幕副本（不删除原始文件）
         try:
             if 'temp_sub_path' in dir() and temp_sub_path and temp_sub_path != sub_path:
                 temp_sub_path.unlink(missing_ok=True)
+                temp_sub_path.parent.rmdir()
         except Exception:
             pass
 
@@ -2018,8 +2018,9 @@ def _prepare_subtitle_for_ffmpeg(sub_path, preview_params):
     
     # 有偏移时创建临时副本
     import shutil
-    temp_name = f".preview_{uuid.uuid4().hex[:8]}_{sub_path.name}"
-    temp_sub_path = sub_path.parent / temp_name
+    import tempfile
+    temp_dir = Path(tempfile.mkdtemp(prefix="subtitle_preview_"))
+    temp_sub_path = temp_dir / sub_path.name
     shutil.copy2(sub_path, temp_sub_path)
     
     try:
@@ -2855,6 +2856,7 @@ async def generate_preview(
         try:
             if temp_sub_path and temp_sub_path != sub_file:
                 temp_sub_path.unlink(missing_ok=True)
+                temp_sub_path.parent.rmdir()
         except Exception:
             pass
     
