@@ -1144,7 +1144,9 @@ async function generatePrecisePreview() {
       return;
     }
     
-    const data = await resp.json();
+    // 直接用响应 blob 作为视频源
+    const blob = await resp.blob();
+    const previewUrl = URL.createObjectURL(blob);
     
     // 保存当前状态
     _savedVideoTime = video.currentTime;
@@ -1157,7 +1159,7 @@ async function generatePrecisePreview() {
     
     // 替换视频源为精确预览
     const wasPlaying = !video.paused;
-    video.src = data.preview_url;
+    video.src = previewUrl;
     video.load();
     video.onloadeddata = () => {
       video.currentTime = 0;

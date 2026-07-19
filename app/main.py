@@ -2780,7 +2780,8 @@ async def generate_preview(
             pass
     
     preview_id = uuid.uuid4().hex[:12]
-    output_path = PREVIEW_DIR / f"{preview_id}.mp4"
+    preview_tmp = Path(tempfile.mkdtemp(prefix="preview_"))
+    output_path = preview_tmp / f"{preview_id}.mp4"
     PREVIEW_WIDTH = 960
     
     # 探测原始视频分辨率和时长
@@ -2860,14 +2861,9 @@ async def generate_preview(
         except Exception:
             pass
     
-    return {
-        "preview_id": preview_id,
-        "preview_url": f"/api/preview/{preview_id}",
-        "duration": duration,
-        "start": start,
-        "resolution": f"{PREVIEW_WIDTH}p",
-        "scale_ratio": round(scale_ratio, 4),
-    }
+    # 直接返回预览文件
+    return FileResponse(output_path, media_type="video/mp4",
+                        headers={"Cache-Control": "no-cache"})
 
 @app.get("/api/preview/{preview_id}")
 async def get_preview(preview_id: str, user: str = Depends(require_auth)):
