@@ -40,7 +40,11 @@
   .video-area { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; position: relative; min-width: 0; }
   .video-area video { max-width: 100%; max-height: 100%; }
 
-  /* Canvas overlay for ASS rendering */
+  /* JASSUB v2 overlay styling */
+  .video-area jassub-element { position: absolute !important; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+  .video-area .jassub-canvas { position: absolute !important; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+
+  /* Canvas overlay for ASS rendering (hidden, JASSUB v2 creates its own) */
   .ass-canvas-wrap {
     position: absolute; top: 0; left: 0; width: 100%; height: 100%;
     pointer-events: none; z-index: 10;
@@ -339,9 +343,17 @@
   </div>
 </div>
 
-<!-- JASSUB v2 (WASM ASS renderer) -->
-<script src="/static/js/jassub.js"></script>
-<script src="/static/js/jassub-worker.js"></script>
+<!-- JASSUB v2 (WASM ASS renderer, ES Module) -->
+<script type="module">
+import JASSUB from '/static/js/jassub.js';
+
+// Make JASSUB available globally for the app
+window.JASSUB = JASSUB;
+console.log('[JASSUB] v2 module loaded');
+
+// Fire a custom event so the main script knows JASSUB is ready
+window.dispatchEvent(new Event('jassub-loaded'));
+</script>
 
 <script>
 // ===== State =====
@@ -531,6 +543,19 @@ async function loadSubtitle(subtitlePath) {
 }
 
 // ===== JASSUB v2 Management =====
+let jassubReady = false;
+
+// Wait for JASSUB module to load
+window.addEventListener('jassub-loaded', () => {
+  jassubReady = true;
+  console.log('[JASSUB] Ready to use');
+  // If init already ran and has content waiting, create renderer now
+  if (state.assContent && state.pendingVideo) {
+    createJassub(state.assContent, state.pendingVideo);
+    state.pendingVideo = null;
+  }
+});
+
 function destroyJassub() {
   if (state.jassub) {
     try {
@@ -541,12 +566,15 @@ function destroyJassub() {
 }
 
 function createJassub(assContent, video) {
+  if (!jassubReady || !window.JASSUB) {
+    console.warn('[JASSUB] Not loaded yet, deferring...');
+    state.pendingVideo = video;
+    return;
+  }
   destroyJassub();
-  const canvas = document.getElementById('assCanvas');
-
-  state.jassub = new JASSUB({
-    video: canvas,
-    subContent: assContent,
+  state.jassub = new window.JASSUB({
+    video: video,
+    content: assContent,
     subCharset: 'UTF-8',
     fallbackFont: 'sans-serif',
     workerUrl: '/static/js/jassub-worker.js',
@@ -558,10 +586,13 @@ function createJassub(assContent, video) {
     },
     onReady: () => {
       console.log('[JASSUB] WASM ready');
-      resizeCanvas();
       showStatus('JASSUB 就绪', 'ok');
     }
   });
+
+  // JASSUB v2 creates its own canvas inside a Shadow DOM on the video element
+  // Style it to overlay properly
+  styleJassubOverlay();
 
   // Sync canvas playback with video
   video.addEventListener('play', () => {
@@ -572,20 +603,23 @@ function createJassub(assContent, video) {
   });
 }
 
+function styleJassubOverlay() {
+  // JASSUB v2 adds a Shadow DOM container to the video's parent
+  // We need to make sure it's positioned correctly
+  const video = document.getElementById('video');
+  const parent = video.parentElement;
+  // Ensure parent has relative positioning
+  if (getComputedStyle(parent).position === 'static') {
+    parent.style.position = 'relative';
+  }
+}
+
 function renderLoop() {
   if (!state.jassub) return;
   const video = document.getElementById('video');
   if (video.paused && !video.seeking) return;
   state.jassub.resize();
   requestAnimationFrame(renderLoop);
-}
-
-function resizeCanvas() {
-  const canvas = document.getElementById('assCanvas');
-  const video = document.getElementById('video');
-  const rect = video.getBoundingClientRect();
-  canvas.width = video.videoWidth || rect.width;
-  canvas.height = video.videoHeight || rect.height;
 }
 
 // ===== Params Collection =====
@@ -732,13 +766,20 @@ function switchPreviewMode(mode) {
   const video = document.getElementById('video');
 
   if (mode === 'js') {
+    // Re-enable JASSUB overlay
     canvasWrap.style.display = 'block';
+    // Re-create JASSUB if needed
+    if (state.assContent && !state.jassub) {
+      createJassub(state.assContent, video);
+    }
     if (state.videoBlobUrl) {
       video.src = state.videoBlobUrl;
       video.currentTime = 0;
     }
   } else {
+    // FFmpeg mode: hide JASSUB overlay
     canvasWrap.style.display = 'none';
+    destroyJassub();
   }
 }
 
