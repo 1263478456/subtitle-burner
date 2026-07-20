@@ -567,7 +567,7 @@ function destroyJassub() {
   }
 }
 
-function createJassub(assContent, video) {
+async function createJassub(assContent, video) {
   const JASSUBClass = window.JASSUBClass;
   if (!JASSUBClass) {
     console.warn('[JASSUB] Not loaded yet, will retry in 500ms...');
@@ -576,24 +576,30 @@ function createJassub(assContent, video) {
     return;
   }
   destroyJassub();
-  state.jassub = new JASSUBClass({
-    video: video,
-    content: assContent,
-    subCharset: 'UTF-8',
-    fallbackFont: 'sans-serif',
-    workerUrl: '/static/js/jassub-worker.js',
-    wasmUrl: '/static/js/jassub-worker.wasm',
-    modernWasmUrl: '/static/js/jassub-worker.wasm',  // same as fallback, avoids import.meta.url
-    availableFonts: {},
-    onError: (err) => {
-      console.error('[JASSUB]', err);
-      showStatus('JASSUB 渲染错误', 'error');
-    },
-    onReady: () => {
-      console.log('[JASSUB] WASM ready');
-      showStatus('JASSUB 就绪', 'ok');
-    }
-  });
+  try {
+    state.jassub = new JASSUBClass({
+      video: video,
+      subContent: assContent,
+      subCharset: 'UTF-8',
+      fallbackFont: 'sans-serif',
+      workerUrl: '/static/js/jassub-worker.js',
+      wasmUrl: '/static/js/jassub-worker.wasm',
+      modernWasmUrl: '/static/js/jassub-worker.wasm',
+      availableFonts: {},
+      onError: (err) => {
+        console.error('[JASSUB]', err);
+        showStatus('JASSUB 渲染错误', 'error');
+      },
+    });
+    console.log('[JASSUB] instance created');
+    await state.jassub.ready;
+    console.log('[JASSUB] WASM ready');
+    showStatus('JASSUB 就绪', 'ok');
+  } catch (e) {
+    console.error('[JASSUB] init error:', e);
+    showStatus('JASSUB 初始化失败: ' + e.message, 'error');
+    return;
+  }
 
   // JASSUB v2 creates its own canvas inside a Shadow DOM on the video element
   // Style it to overlay properly
