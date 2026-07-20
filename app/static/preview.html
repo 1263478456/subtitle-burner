@@ -1861,6 +1861,13 @@ function initJASSUB(subtitleContent, subtitleType) {
   // 检查 JASSUB 是否可用
   if (typeof JASSUB === 'undefined') {
     console.warn('[JASSUB] 库未加载，回退到 JS 渲染');
+    // 显示加载失败提示
+    const modeEl = document.getElementById('renderMode');
+    if (modeEl) {
+      modeEl.textContent = '⚠️ JASSUB 加载失败，使用 JS 渲染';
+      modeEl.style.color = '#ef4444';
+    }
+    updateRenderModeHint('fallback');
     return false;
   }
   
@@ -1881,6 +1888,9 @@ function initJASSUB(subtitleContent, subtitleType) {
       content: assContent,
       subCharset: 'UTF-8',
       fallbackFont: 'sans-serif',
+      // 显式指定 Worker 和 WASM 文件的 CDN 地址
+      workerUrl: 'https://cdn.jsdelivr.net/npm/jassub@2.0.15/dist/jassub-worker.js',
+      wasmUrl: 'https://cdn.jsdelivr.net/npm/jassub@2.0.15/dist/jassub-worker.wasm',
       // 禁用 JASSUB 的默认字体加载，使用页面已有的字体
       availableFonts: {},
     });
@@ -1922,6 +1932,9 @@ function updateRenderModeHint(mode) {
   if (mode === 'original') {
     hintEl.textContent = 'ASS 文件：页面样式控件不影响预览，使用原始字幕样式';
     hintEl.style.color = '#f59e0b';
+  } else if (mode === 'fallback') {
+    hintEl.textContent = 'JASSUB 未加载，ASS 特效无法显示，请检查网络或浏览器兼容性';
+    hintEl.style.color = '#ef4444';
   } else {
     hintEl.textContent = 'SRT/VTT 文件：页面样式控件可实时调整预览效果';
     hintEl.style.color = '#10b981';
