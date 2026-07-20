@@ -584,11 +584,8 @@ async function createJassub(assContent, video) {
       fallbackFont: 'sans-serif',
       workerUrl: '/static/js/jassub-worker-bundle.mjs',
       wasmUrl: '/static/js/jassub-worker.wasm',
-      modernWasmUrl: '/static/js/jassub-worker.wasm',
+      modernWasmUrl: '/static/js/jassub-worker-modern.wasm',
       availableFonts: {},
-      // Force WebGL, skip WebGPU attempts that throw errors
-      offscreenRender: false,
-      // Enable online font search as fallback
       queryFonts: 'localandremote',
     });
     console.log('[JASSUB] instance created');
