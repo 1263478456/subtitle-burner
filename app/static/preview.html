@@ -586,6 +586,10 @@ async function createJassub(assContent, video) {
       wasmUrl: '/static/js/jassub-worker.wasm',
       modernWasmUrl: '/static/js/jassub-worker.wasm',
       availableFonts: {},
+      // Force WebGL, skip WebGPU attempts that throw errors
+      offscreenRender: false,
+      // Enable online font search as fallback
+      queryFonts: 'localandremote',
     });
     console.log('[JASSUB] instance created');
     showStatus('JASSUB 初始化中...', 'loading');
@@ -598,8 +602,9 @@ async function createJassub(assContent, video) {
       console.warn('[JASSUB] ready error:', e);
     });
 
-    // Style overlay
-    styleJassubOverlay();
+    // Style overlay — ensure video area has relative positioning
+    const videoArea = document.getElementById('videoArea');
+    if (videoArea) videoArea.style.position = 'relative';
     showStatus('JASSUB 已加载', 'ok');
   } catch (e) {
     console.error('[JASSUB] init error:', e);
