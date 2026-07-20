@@ -572,8 +572,16 @@ function createJassub(assContent, video) {
   }
   destroyJassub();
   try {
+    // Use canvas-only mode: avoids Chrome OffscreenCanvas compositing bug
+    const canvas = document.getElementById('assCanvas');
+    canvas.style.display = 'block';
+    canvas.style.pointerEvents = 'none';
+    canvas.style.zIndex = '100';
+    canvas.width = video.videoWidth || canvas.width;
+    canvas.height = video.videoHeight || canvas.height;
+
     state.jassub = new JASSUB({
-      video: video,
+      canvas: canvas,
       subContent: assContent,
       subCharset: 'UTF-8',
       fallbackFont: 'sans-serif',
@@ -596,10 +604,24 @@ function createJassub(assContent, video) {
     document.getElementById('assCanvasWrap')?.style?.display = 'none';
   }, 2000);
 
-  // Sync with video playback
-  video.addEventListener('play', () => {
-    if (state.jassub) requestAnimationFrame(renderLoop);
-  });
+  // Use manual render loop for canvas mode
+  function renderLoopCanvas() {
+    if (!state.jassub || state.jassub._destroyed) return;
+    const v = document.getElementById('video');
+    if (!v) return;
+    const w = v.videoWidth || 1920;
+    const h = v.videoHeight || 1080;
+    const t = v.currentTime || 0;
+    try {
+      state.jassub.manualRender({ expectedDisplayTime: performance.now(), width: w, height: h, mediaTime: t });
+    } catch(e) {}
+    if (!v.paused || v.seeking) requestAnimationFrame(renderLoopCanvas);
+  }
+
+  video.addEventListener('play', () => requestAnimationFrame(renderLoopCanvas));
+  video.addEventListener('seeked', () => { if (state.jassub) requestAnimationFrame(renderLoopCanvas); });
+  // Initial render
+  setTimeout(() => { if (state.jassub) requestAnimationFrame(renderLoopCanvas); }, 1000);
 }
   video.addEventListener('play', () => {
     if (state.jassub) requestAnimationFrame(renderLoop);
@@ -607,25 +629,6 @@ function createJassub(assContent, video) {
   video.addEventListener('seeked', () => {
     if (state.jassub) state.jassub.resize();
   });
-}
-
-function styleJassubOverlay() {
-  // JASSUB v2 adds a Shadow DOM container to the video's parent
-  // We need to make sure it's positioned correctly
-  const video = document.getElementById('video');
-  const parent = video.parentElement;
-  // Ensure parent has relative positioning
-  if (getComputedStyle(parent).position === 'static') {
-    parent.style.position = 'relative';
-  }
-}
-
-function renderLoop() {
-  if (!state.jassub || state.jassub._destroyed) return;
-  const video = document.getElementById('video');
-  if (!video || video.paused && !video.seeking) return;
-  try { state.jassub.resize(); } catch(e) {}
-  requestAnimationFrame(renderLoop);
 }
 
 // ===== Params Collection =====
