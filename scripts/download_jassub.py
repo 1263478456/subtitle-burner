@@ -102,40 +102,43 @@ def download_and_extract(version: str) -> dict:
 
 
 def build_bundle(version: str) -> bool:
-    """用 esbuild 将 JASSUB 打包为浏览器可用的 IIFE 格式"""
+    """用 esbuild 将 JASSUB 打包为浏览器可用的 ESM 格式（保留 import.meta.url）"""
     import tempfile, shutil as _shutil
     
-    # 创建临时目录安装依赖
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        
-        # 创建 package.json
         (tmpdir / "package.json").write_text('{"name":"jassub-build","version":"1.0.0"}')
         
-        # 安装 jassub
         print(f"  安装 jassub@{version} 依赖...")
         result = subprocess.run(
-            ["npm", "install", f"jassub@{version}", "rvfc-polyfill", "abslink"],
+            ["npm", "install", f"jassub@{version}"],
             cwd=str(tmpdir), capture_output=True, timeout=60
         )
         if result.returncode != 0:
             print(f"  [ERROR] npm install 失败: {result.stderr.decode()[-200:]}")
             return False
         
-        # 找到 TypeScript 源码路径
         src_file = tmpdir / "node_modules" / "jassub" / "src" / "jassub.ts"
         if not src_file.exists():
             print(f"  [ERROR] 找不到源码: {src_file}")
             return False
         
-        # 用 esbuild 打包
-        output_file = OUTPUT_DIR / "jassub.bundle.js"
-        print(f"  esbuild 打包中...")
+        # 写入入口文件：export default 并挂载到 window
+        entry_file = tmpdir / "entry.mjs"
+        entry_file.write_text(
+            'import JASSUB from "jassub"\n'
+            'window.JASSUBClass = JASSUB\n'
+            'export default JASSUB\n'
+        )
+        
+        output_file = OUTPUT_DIR / "jassub.bundle.mjs"
+        print(f"  esbuild 打包中 (ESM 格式)...")
         result = subprocess.run(
-            ["npx", "esbuild", str(src_file),
-             "--bundle", "--format=iife", "--global-name=JASSUB",
+            ["npx", "esbuild", str(entry_file),
+             "--bundle", "--format=esm",
              f"--outfile={output_file}", "--platform=browser",
-             "--target=es2020", "--loader:.wasm=empty", "--loader:.ts=ts"],
+             "--target=es2020", "--minify",
+             "--loader:.wasm=empty", "--loader:.ts=ts"],
             cwd=str(tmpdir), capture_output=True, timeout=30
         )
         if result.returncode != 0:
@@ -144,7 +147,7 @@ def build_bundle(version: str) -> bool:
         
         if output_file.exists():
             size = output_file.stat().st_size
-            print(f"  [OK] jassub.bundle.js ({size:,} bytes)")
+            print(f"  [OK] jassub.bundle.mjs ({size:,} bytes)")
             return True
         else:
             print(f"  [ERROR] 打包文件未生成")
