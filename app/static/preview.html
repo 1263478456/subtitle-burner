@@ -570,8 +570,9 @@ function destroyJassub() {
 function createJassub(assContent, video) {
   const JASSUBClass = window.JASSUBClass;
   if (!JASSUBClass) {
-    console.warn('[JASSUB] Not loaded yet, will retry...');
+    console.warn('[JASSUB] Not loaded yet, will retry in 500ms...');
     showStatus('等待 JASSUB 加载...', 'loading');
+    setTimeout(() => createJassub(assContent, video), 500);
     return;
   }
   destroyJassub();
@@ -1190,12 +1191,15 @@ function bindControls() {
   document.getElementById('ctrlColor').addEventListener('input', updateAllVals);
 
   // Video resize observer — trigger JASSUB resize
-  const observer = new ResizeObserver(() => {
-    if (state.jassub) {
-      try { state.jassub.resize(); } catch(e) {}
-    }
-  });
-  observer.observe(document.getElementById('video'));
+  const videoEl = document.getElementById('video');
+  if (videoEl) {
+    const observer = new ResizeObserver(() => {
+      if (state.jassub) {
+        try { state.jassub.resize(); } catch(e) {}
+      }
+    });
+    observer.observe(videoEl);
+  }
 }
 
 // ===== Start =====
