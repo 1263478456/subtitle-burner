@@ -441,6 +441,20 @@ function removeFromPendingQueue(index) {
   loadPendingQueue();
 }
 
+function clearPendingQueue() {
+  if (!confirm('确定清空待压制队列？')) return;
+  localStorage.removeItem('burnQueue');
+  loadPendingQueue();
+}
+
+function startBatchBurnFromQueue() {
+  let burnQueue = [];
+  try { burnQueue = JSON.parse(localStorage.getItem('burnQueue') || '[]'); } catch(e) {}
+  if (burnQueue.length === 0) { alert('队列为空'); return; }
+  // Navigate to main page with queue data
+  window.location.href = '/';
+}
+
 // 关于弹窗
 function openAboutModal() {
   document.getElementById('aboutModal').style.display = 'flex';
@@ -515,6 +529,10 @@ function togglePreview() {
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid #e2e8f0;">
         <span style="font-size:13px; color:#64748b;">共 <span id="pendingQueueCount">0</span> 个任务</span>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" style="font-size:12px; padding:6px 12px;" onclick="clearPendingQueue()">清空队列</button>
+          <button class="btn btn-primary" id="startBatchBurnBtn" style="font-size:12px; padding:6px 12px;" onclick="startBatchBurnFromQueue()" disabled>🔥 开始压制</button>
+        </div>
       </div>
     </div>
   </div>
