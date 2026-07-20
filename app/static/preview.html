@@ -591,13 +591,37 @@ async function createJassub(assContent, video) {
     console.log('[JASSUB] instance created');
     showStatus('JASSUB 初始化中...', 'loading');
 
-    // Don't block — let JASSUB init in background
+    // Wait for ready
     state.jassub.ready?.then?.(() => {
       console.log('[JASSUB] WASM ready');
       showStatus('JASSUB 就绪', 'ok');
     })?.catch?.((e) => {
       console.warn('[JASSUB] ready error:', e);
     });
+
+    // Debug after 3 seconds
+    setTimeout(() => {
+      const va = document.getElementById('videoArea');
+      const vid = document.getElementById('video');
+      console.log('[DEBUG] === JASSUB Diagnostic ===');
+      console.log('[DEBUG] videoArea children:', va?.children?.length);
+      for (const c of va?.children || []) {
+        const cs = getComputedStyle(c);
+        console.log('[DEBUG]  child:', c.tagName, 'display:', cs.display, 'z-index:', cs.zIndex, 'position:', cs.position);
+      }
+      const je = va?.querySelector('jassub-element');
+      console.log('[DEBUG] jassub-element found:', !!je);
+      if (je) {
+        const r = je.getBoundingClientRect();
+        console.log('[DEBUG] jassub rect:', r.width, 'x', r.height);
+        const cv = je.querySelector('canvas');
+        console.log('[DEBUG] canvas found:', !!cv, cv ? cv.width+'x'+cv.height : '');
+      }
+      console.log('[DEBUG] video paused:', vid?.paused, 'time:', vid?.currentTime);
+      console.log('[DEBUG] subContent len:', assContent?.length, 'preview:', assContent?.substring(0, 80));
+      // Force resize
+      if (state.jassub) { state.jassub.resize(); console.log('[JASSUB] forced resize'); }
+    }, 3000);
 
     // Style overlay — ensure video area has relative positioning
     const videoArea = document.getElementById('videoArea');
