@@ -24,6 +24,9 @@ JASSUB_VERSION = "2.0.15"
 FILE_MAP = {
     "package/dist/wasm/jassub-worker.js": "jassub-worker.js",
     "package/dist/wasm/jassub-worker.wasm": "jassub-worker.wasm",
+    "package/dist/worker/worker.js": "_worker_src.js",
+    "package/dist/worker/util.js": "_worker_util.js",
+    "package/dist/worker/webgpu-renderer.js": "_worker_webgpu.js",
 }
 
 OUTPUT_DIR = Path(__file__).parent.parent / "app" / "static" / "js"
@@ -118,12 +121,8 @@ def build_bundle(version: str) -> bool:
             print(f"  [ERROR] npm install 失败: {result.stderr.decode()[-200:]}")
             return False
         
+        # 1. 打包主 JASSUB 类（ESM 格式，保留 import.meta.url）
         src_file = tmpdir / "node_modules" / "jassub" / "src" / "jassub.ts"
-        if not src_file.exists():
-            print(f"  [ERROR] 找不到源码: {src_file}")
-            return False
-        
-        # 写入入口文件：export default 并挂载到 window
         entry_file = tmpdir / "entry.mjs"
         entry_file.write_text(
             'import JASSUB from "jassub"\n'
@@ -131,27 +130,52 @@ def build_bundle(version: str) -> bool:
             'export default JASSUB\n'
         )
         
-        output_file = OUTPUT_DIR / "jassub.bundle.mjs"
-        print(f"  esbuild 打包中 (ESM 格式)...")
+        output_main = OUTPUT_DIR / "jassub.bundle.mjs"
+        print(f"  esbuild 打包主类 (ESM)...")
         result = subprocess.run(
             ["npx", "esbuild", str(entry_file),
              "--bundle", "--format=esm",
-             f"--outfile={output_file}", "--platform=browser",
+             f"--outfile={output_main}", "--platform=browser",
              "--target=es2020", "--minify",
              "--loader:.wasm=empty", "--loader:.ts=ts"],
             cwd=str(tmpdir), capture_output=True, timeout=30
         )
         if result.returncode != 0:
-            print(f"  [ERROR] esbuild 打包失败: {result.stderr.decode()[-200:]}")
+            print(f"  [ERROR] 主类打包失败: {result.stderr.decode()[-200:]}")
             return False
         
-        if output_file.exists():
-            size = output_file.stat().st_size
-            print(f"  [OK] jassub.bundle.mjs ({size:,} bytes)")
-            return True
-        else:
-            print(f"  [ERROR] 打包文件未生成")
+        # 2. 打包 Worker 脚本（ESM 格式，bundle 所有依赖）
+        worker_entry = tmpdir / "worker-entry.mjs"
+        worker_entry.write_text(
+            'export * from "jassub/dist/worker/worker.js"\n'
+        )
+        
+        output_worker = OUTPUT_DIR / "jassub-worker-bundle.mjs"
+        print(f"  esbuild 打包 Worker...")
+        result = subprocess.run(
+            ["npx", "esbuild", str(worker_entry),
+             "--bundle", "--format=esm",
+             f"--outfile={output_worker}", "--platform=browser",
+             "--target=es2020", "--minify",
+             "--loader:.wasm=empty", "--loader:.ts=ts"],
+            cwd=str(tmpdir), capture_output=True, timeout=30
+        )
+        if result.returncode != 0:
+            print(f"  [ERROR] Worker 打包失败: {result.stderr.decode()[-200:]}")
             return False
+        
+        ok = True
+        if output_main.exists():
+            print(f"  [OK] jassub.bundle.mjs ({output_main.stat().st_size:,} bytes)")
+        else:
+            print(f"  [ERROR] jassub.bundle.mjs 未生成"); ok = False
+        
+        if output_worker.exists():
+            print(f"  [OK] jassub-worker-bundle.mjs ({output_worker.stat().st_size:,} bytes)")
+        else:
+            print(f"  [ERROR] jassub-worker-bundle.mjs 未生成"); ok = False
+        
+        return ok
 
 
 def save_version_info(version: str, files: list):
