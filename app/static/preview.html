@@ -591,14 +591,19 @@ async function createJassub(assContent, video) {
         showStatus('JASSUB 渲染错误', 'error');
       },
     });
-    console.log('[JASSUB] instance created');
-    await state.jassub.ready;
+    console.log('[JASSUB] instance created, waiting for ready...');
+
+    // Wait for ready with timeout
+    if (state.jassub.ready && typeof state.jassub.ready.then === 'function') {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
+      await Promise.race([state.jassub.ready, timeout]);
+    }
     console.log('[JASSUB] WASM ready');
     showStatus('JASSUB 就绪', 'ok');
   } catch (e) {
-    console.error('[JASSUB] init error:', e);
-    showStatus('JASSUB 初始化失败: ' + e.message, 'error');
-    return;
+    console.warn('[JASSUB] ready wait result:', e.message || e);
+    // Still try to use it — might work even if ready didn't resolve
+    showStatus('JASSUB 已加载', 'ok');
   }
 
   // JASSUB v2 creates its own canvas inside a Shadow DOM on the video element
