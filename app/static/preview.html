@@ -3,3754 +3,969 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>字幕预览 · Subtitle Preview</title>
-<!-- JASSUB: libass WASM 字幕渲染器（本地文件） -->
-<script src="/static/js/jassub.js"></script>
+<title>字幕预览 - Subtitle Burner</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
 <style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-:root {
-  --bg: #0f0f0f; --panel: #1a1a1a; --border: #333;
-  --text: #e5e5e5; --muted: #999; --dim: #666;
-  --primary: #3b82f6; --purple: #8b5cf6;
-  --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
-}
-body { 
-  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: var(--bg); color: var(--text); min-height: 100vh;
-  display: flex; flex-direction: column; height: 100vh;
-  overflow: hidden;
-}
-body.embedded { height: 100vh; overflow: hidden; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0f0f0f; --surface: #1a1a2e; --surface2: #16213e;
+    --accent: #667eea; --accent2: #764ba2; --accent-glow: rgba(102,126,234,0.3);
+    --text: #e8e8e8; --text2: #8892b0; --success: #4ade80; --warning: #fbbf24;
+    --error: #f87171; --border: rgba(255,255,255,0.08);
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; overflow: hidden; height: 100vh; }
 
-/* Header */
-header { 
-  background: var(--panel); border-bottom: 1px solid var(--border);
-  padding: 10px 16px; display: flex; justify-content: space-between; align-items: center;
-  flex-shrink: 0;
-}
-.header-left { display: flex; align-items: center; gap: 12px; }
-header h1 { 
-  font-size: 15px;
-  background: linear-gradient(135deg, var(--primary), var(--purple));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-}
-.btn-back { 
-  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
-  background: transparent; color: var(--muted); cursor: pointer; font-size: 12px;
-  text-decoration: none; display: flex; align-items: center; gap: 4px;
-}
-.btn-back:hover { color: var(--text); border-color: var(--primary); }
-.header-actions { display: flex; gap: 6px; }
-.btn { 
-  padding: 7px 14px; border-radius: 6px; border: none; cursor: pointer;
-  font-size: 12px; font-weight: 500; transition: all 0.15s;
-}
-.btn-primary { background: linear-gradient(135deg, var(--primary), var(--purple)); color: #fff; }
-.btn-primary:hover { opacity: 0.9; }
-.btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
-.btn-ghost:hover { color: var(--text); border-color: var(--primary); }
-.btn-sm { padding: 5px 10px; font-size: 11px; }
+  /* === Top Bar === */
+  .top-bar {
+    height: 48px; background: var(--surface); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 16px; gap: 12px; z-index: 100;
+    position: relative;
+  }
+  .top-bar .back-btn {
+    background: none; border: none; color: var(--text2); cursor: pointer;
+    font-size: 18px; padding: 4px 8px; border-radius: 6px; transition: all 0.2s;
+  }
+  .top-bar .back-btn:hover { background: var(--surface2); color: var(--text); }
+  .top-bar .file-info { font-size: 13px; color: var(--text2); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .top-bar .file-info strong { color: var(--text); }
+  .top-bar .status-badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: rgba(74,222,128,0.15); color: var(--success);
+  }
+  .top-bar .status-badge.loading { background: rgba(251,191,36,0.15); color: var(--warning); }
+  .top-bar .status-badge.error { background: rgba(248,113,113,0.15); color: var(--error); }
 
-/* Main Container */
-.main-container { 
-  flex: 1; display: flex; gap: 0; overflow: clip;
-  min-height: 0;
-}
-body.embedded .main-container { min-height: 0; }
+  /* === Main Layout === */
+  .main { display: flex; height: calc(100vh - 48px); }
+  .video-area { flex: 1; display: flex; align-items: center; justify-content: center; background: #000; position: relative; min-width: 0; }
+  .video-area video { max-width: 100%; max-height: 100%; }
 
-/* Video Section */
-.video-section { 
-  flex: 1; min-width: 0;
-  display: flex; flex-direction: column; 
-  background: #000; position: relative; overflow: hidden;
-}
-.video-wrapper { 
-  flex: 1; position: relative; overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  background: #000; min-height: 0;
-}
-#videoPlayer { 
-  max-width: 100%; max-height: 100%;
-  object-fit: contain;
-}
+  /* Canvas overlay for ASS rendering */
+  .ass-canvas-wrap {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 10;
+  }
+  .ass-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
 
-/* Subtitle Overlay */
-.subtitle-overlay { 
-  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  pointer-events: none; overflow: hidden;
-}
+  /* Loading overlay */
+  .video-loading {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(0,0,0,0.85);
+    z-index: 50; transition: opacity 0.3s;
+  }
+  .video-loading.hidden { opacity: 0; pointer-events: none; }
+  .video-loading .spinner {
+    width: 36px; height: 36px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  .video-loading .load-text { margin-top: 12px; font-size: 13px; color: var(--text2); }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-/* JASSUB Canvas */
-.jassub-canvas {
-  position: absolute !important;
-  top: 0; left: 0; right: 0; bottom: 0;
-  pointer-events: none;
-  z-index: 10;
-}
+  /* ffmpeg preview loading */
+  .ffmpeg-loading {
+    position: absolute; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(0,0,0,0.75);
+    z-index: 45;
+  }
+  .ffmpeg-loading.active { display: flex; }
+  .ffmpeg-loading .spinner {
+    width: 30px; height: 30px; border: 3px solid var(--border);
+    border-top-color: var(--accent2); border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  .ffmpeg-loading .load-text { margin-top: 10px; font-size: 13px; color: var(--text2); }
 
-.subtitle-line { 
-  position: absolute; text-align: center; width: 100%;
-  padding: 0 20px;
-  text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-  transition: all 0.1s ease;
-  white-space: pre-wrap; word-wrap: break-word;
-}
+  /* === Side Panel === */
+  .side-panel {
+    width: 340px; background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden; flex-shrink: 0;
+  }
+  .panel-header {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-header h3 { font-size: 14px; font-weight: 600; }
 
-/* Safe Area Guide */
-.safe-area-guide {
-  position: absolute;
-  pointer-events: none;
-  display: none;
-  z-index: 5;
-}
-.safe-area-guide.visible { display: block; }
-.safe-area-border {
-  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  border: 2px dashed rgba(255, 80, 80, 0.7);
-  border-radius: 2px;
-}
-.safe-area-label {
-  position: absolute; top: 4px; left: 6px;
-  font-size: 10px; color: rgba(255, 80, 80, 0.85);
-  font-family: monospace; font-weight: bold;
-  background: rgba(0,0,0,0.5); padding: 1px 5px; border-radius: 3px;
-  white-space: nowrap;
-}
-.safe-area-title {
-  position: absolute;
-  top: 8%; left: 8%; right: 8%; bottom: 8%;
-  border: 1px dashed rgba(255, 200, 0, 0.5);
-  border-radius: 2px;
-}
-.safe-area-title-label {
-  position: absolute; top: 3px; right: 5px;
-  font-size: 9px; color: rgba(255, 200, 0, 0.7);
-  font-family: monospace;
-  background: rgba(0,0,0,0.5); padding: 1px 4px; border-radius: 3px;
-  white-space: nowrap;
-}
-.safe-area-grid {
-  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  pointer-events: none;
-}
-.safe-area-grid .hline {
-  position: absolute; left: 0; right: 0; height: 1px;
-  background: rgba(255, 255, 255, 0.12);
-}
-.safe-area-grid .vline {
-  position: absolute; top: 0; bottom: 0; width: 1px;
-  background: rgba(255, 255, 255, 0.12);
-}
+  /* Preview mode toggle */
+  .preview-mode-toggle {
+    display: flex; gap: 4px; background: var(--bg); border-radius: 6px; padding: 2px;
+  }
+  .preview-mode-toggle button {
+    font-size: 11px; padding: 4px 10px; border: none; border-radius: 4px;
+    cursor: pointer; background: transparent; color: var(--text2); transition: all 0.2s;
+  }
+  .preview-mode-toggle button.active { background: var(--accent); color: white; }
+  .preview-mode-toggle button:hover:not(.active) { color: var(--text); }
 
-/* Video Controls */
-.video-controls { 
-  background: var(--panel); border-top: 1px solid var(--border);
-  padding: 10px 14px; flex-shrink: 0;
-}
-.progress-bar { 
-  width: 100%; height: 12px; background: #333; border-radius: 3px;
-  cursor: pointer; margin-bottom: 8px; position: relative;
-}
-.progress-fill { 
-  height: 100%; background: linear-gradient(90deg, var(--primary), var(--purple));
-  border-radius: 3px; width: 0%; transition: width 0.1s;
-  pointer-events: none;
-}
-.controls-row { 
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-}
-.controls-row button { 
-  background: transparent; border: none; color: var(--text);
-  cursor: pointer; font-size: 16px; padding: 4px;
-}
-.controls-row button:hover { color: var(--primary); }
-.time-display { 
-  font-size: 11px; color: var(--muted); font-family: monospace;
-}
-.time-display .current { color: var(--text); }
-.volume-control { 
-  display: flex; align-items: center; gap: 4px; margin-left: auto;
-}
-.volume-control input[type="range"] { 
-  width: 60px; height: 4px; -webkit-appearance: none; background: #444;
-  border-radius: 2px; outline: none;
-}
-.volume-control input[type="range"]::-webkit-slider-thumb { 
-  -webkit-appearance: none; width: 10px; height: 10px;
-  background: #fff; border-radius: 50%; cursor: pointer;
-}
-.speed-control select { 
-  background: #333; border: 1px solid #444; color: var(--text);
-  padding: 3px 6px; border-radius: 4px; font-size: 11px;
-}
+  .panel-scroll { flex: 1; overflow-y: auto; padding: 12px 16px; }
+  .panel-scroll::-webkit-scrollbar { width: 4px; }
+  .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* Control Panel */
-.control-panel { 
-  width: 320px; min-width: 320px; max-width: 320px;
-  flex-shrink: 0; flex-grow: 0;
-  background: var(--panel); border-left: 1px solid var(--border);
-  overflow-y: auto; display: flex; flex-direction: column;
-  min-height: 0;
-}
-.control-panel::-webkit-scrollbar { width: 6px; }
-.control-panel::-webkit-scrollbar-track { background: transparent; }
-.control-panel::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-.control-panel::-webkit-scrollbar-thumb:hover { background: #666; }
-body.embedded .control-panel { width: 280px; }
-.panel-section { 
-  padding: 12px; border-bottom: 1px solid var(--border);
-}
-.panel-section h3 { 
-  font-size: 12px; color: var(--text); margin-bottom: 10px;
-  display: flex; align-items: center; gap: 6px;
-}
-.panel-section h3 .icon { font-size: 13px; }
-.form-group { margin-bottom: 10px; }
-.form-group label { 
-  display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px;
-}
-.form-group input[type="number"],
-.form-group input[type="text"],
-.form-group select { 
-  width: 100%; padding: 7px 9px; border-radius: 5px;
-  border: 1px solid var(--border); background: #222;
-  color: var(--text); font-size: 12px; outline: none;
-}
-.form-group input:focus, .form-group select:focus { 
-  border-color: var(--primary);
-}
-.color-input { 
-  display: flex; align-items: center; gap: 6px;
-}
-.color-input input[type="color"] { 
-  width: 32px; height: 32px; border: 1px solid var(--border);
-  border-radius: 5px; cursor: pointer; padding: 2px; background: #222;
-}
-.color-input input[type="text"] { flex: 1; }
+  /* Control sections */
+  .ctrl-section { margin-bottom: 16px; }
+  .ctrl-section-title {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--accent); margin-bottom: 8px;
+    padding-bottom: 4px; border-bottom: 1px solid var(--border);
+  }
+  .ctrl-row { display: flex; align-items: center; margin-bottom: 6px; gap: 8px; }
+  .ctrl-row label { font-size: 12px; color: var(--text2); width: 64px; flex-shrink: 0; }
+  .ctrl-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+  .ctrl-row .val {
+    font-size: 11px; color: var(--accent); width: 36px; text-align: right;
+    font-family: 'Consolas', monospace;
+  }
+  .ctrl-row select, .ctrl-row input[type="number"], .ctrl-row input[type="color"] {
+    flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); padding: 4px 6px; font-size: 12px;
+  }
+  .ctrl-row input[type="color"] { height: 28px; padding: 2px; cursor: pointer; }
+  .ctrl-row select:focus, .ctrl-row input:focus { border-color: var(--accent); outline: none; }
 
-/* Range Slider */
-input[type="range"] { 
-  width: 100%; height: 5px; -webkit-appearance: none;
-  background: #333; border-radius: 3px; outline: none;
-}
-input[type="range"]::-webkit-slider-thumb { 
-  -webkit-appearance: none; width: 12px; height: 12px;
-  background: var(--primary); border-radius: 50%; cursor: pointer;
-}
-.range-value { 
-  font-size: 10px; color: var(--muted); text-align: right; margin-top: 2px;
-}
+  /* Preset buttons */
+  .preset-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
+  .preset-btn {
+    font-size: 11px; padding: 4px 10px; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--bg); color: var(--text2);
+    cursor: pointer; transition: all 0.2s;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .preset-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+  .preset-btn.danger { border-color: var(--error); color: var(--error); }
+  .preset-btn.danger:hover { background: var(--error); color: white; }
 
-/* Presets */
-.presets { 
-  display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
-}
-.preset-btn { 
-  padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border);
-  background: #222; color: var(--muted); cursor: pointer; font-size: 10px;
-}
-.preset-btn:hover { border-color: var(--primary); color: var(--primary); }
+  /* FFmpeg preview button */
+  .ffmpeg-btn {
+    width: 100%; padding: 8px; margin-top: 8px; border: 1px solid var(--accent2);
+    border-radius: 6px; background: rgba(118,75,162,0.15); color: var(--accent2);
+    font-size: 12px; cursor: pointer; transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .ffmpeg-btn:hover { background: rgba(118,75,162,0.25); }
+  .ffmpeg-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Shortcuts */
-.shortcuts { 
-  padding: 10px 12px; background: #111; font-size: 10px; color: var(--dim);
-}
-.shortcuts kbd { 
-  background: #333; padding: 1px 4px; border-radius: 3px;
-  border: 1px solid #444; font-family: monospace;
-}
+  /* Submit button */
+  .submit-bar {
+    padding: 12px 16px; border-top: 1px solid var(--border); background: var(--surface);
+  }
+  .submit-btn {
+    width: 100%; padding: 10px; border: none; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: white; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .submit-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+  .submit-btn:active { transform: scale(0.98); }
 
-/* File Info */
-.file-info {
-  padding: 8px 12px; background: #111; border-bottom: 1px solid var(--border);
-  font-size: 11px; color: var(--muted);
-  display: flex; gap: 16px;
-  flex-shrink: 0;
-}
-.file-info span { display: flex; align-items: center; gap: 4px; }
-.file-info .name { color: var(--text); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Cache info */
+  .cache-info {
+    padding: 8px 16px; border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text2); display: flex; align-items: center; gap: 8px;
+  }
+  .cache-info .cache-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .cache-info .cache-dot.hit { background: var(--success); }
+  .cache-info .cache-dot.miss { background: var(--warning); }
 
-/* Loading */
-.loading { 
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  color: var(--muted); font-size: 13px; text-align: center;
-}
-.loading-spinner { 
-  width: 32px; height: 32px; border: 3px solid #333;
-  border-top-color: var(--primary); border-radius: 50%;
-  animation: spin 1s linear infinite; margin: 0 auto 10px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
+  /* Toast */
+  .toast {
+    position: fixed; top: 60px; right: 16px; padding: 10px 16px;
+    border-radius: 8px; font-size: 13px; z-index: 9999;
+    animation: slideIn 0.3s ease; max-width: 360px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .toast.success { background: rgba(74,222,128,0.15); border: 1px solid rgba(74,222,128,0.3); color: var(--success); }
+  .toast.error { background: rgba(248,113,113,0.15); border: 1px solid rgba(248,113,113,0.3); color: var(--error); }
+  .toast.info { background: rgba(102,126,234,0.15); border: 1px solid rgba(102,126,234,0.3); color: var(--accent); }
+  @keyframes slideIn { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: none; } }
 
-/* Toast */
-.toast { 
-  position: fixed; top: 20px; right: 20px; padding: 10px 16px;
-  border-radius: 8px; font-size: 12px; z-index: 10000;
-  transform: translateX(120%); transition: transform 0.3s;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-}
-.toast.show { transform: translateX(0); }
-.toast.success { background: #065f46; color: #d1fae5; }
-.toast.error { background: #991b1b; color: #fee2e2; }
-
-/* Media Browser Modal */
-.modal-overlay {
-  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.8); z-index: 9999;
-  align-items: center; justify-content: center;
-}
-.modal-overlay.active { display: flex; }
-.modal {
-  background: #1a1a1a; border: 1px solid #333; border-radius: 12px;
-  width: 600px; max-height: 70vh; overflow: hidden;
-  display: flex; flex-direction: column;
-}
-.modal-header {
-  padding: 14px 16px; border-bottom: 1px solid #333;
-  display: flex; justify-content: space-between; align-items: center;
-}
-.modal-header h3 { font-size: 14px; color: #e5e5e5; }
-.modal-close {
-  background: none; border: none; color: #999; cursor: pointer; font-size: 16px;
-}
-.modal-breadcrumb {
-  padding: 10px 16px; border-bottom: 1px solid #333;
-  font-size: 11px; color: #999;
-}
-.modal-list {
-  flex: 1; overflow-y: auto; padding: 10px; min-height: 250px;
-}
-.modal-footer {
-  padding: 12px 16px; border-top: 1px solid #333;
-  display: flex; justify-content: space-between; align-items: center;
-}
-.modal-footer .selection-info { font-size: 11px; color: #666; }
-.modal-footer .actions { display: flex; gap: 8px; }
-
-/* Media Item */
-.media-item {
-  padding: 8px 10px; cursor: pointer; border-radius: 6px;
-  display: flex; align-items: center; gap: 8px; font-size: 12px;
-  border: 1px solid transparent;
-}
-.media-item:hover { background: #222; }
-.media-item.selected { background: rgba(59,130,246,0.2); border-color: #3b82f6; }
-.media-item .icon { font-size: 14px; }
-.media-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.media-item .size { color: #666; font-size: 10px; }
-
-/* Responsive */
-@media (max-width: 900px) {
-  .main-container { flex-direction: column; }
-  .control-panel { width: 100%; max-height: 300px; }
-  .video-section { min-height: 300px; }
-}
+  /* Responsive */
+  @media (max-width: 800px) {
+    .main { flex-direction: column; }
+    .side-panel { width: 100%; height: 50vh; border-left: none; border-top: 1px solid var(--border); }
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="header-left" id="headerLeft">
-    <a href="/" class="btn-back" id="backBtn">← 返回主页</a>
-    <h1 id="headerTitle">🎬 字幕预览</h1>
-  </div>
-  <div class="header-actions" id="headerActions">
-    <button class="btn btn-ghost btn-sm" onclick="loadLocalVideo()">📹 本地视频</button>
-    <button class="btn btn-ghost btn-sm" onclick="loadLocalSubtitle()">💬 本地字幕</button>
-    <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('video')">📁 媒体库视频</button>
-    <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('subtitle')">📁 媒体库字幕</button>
-    <button class="btn btn-ghost btn-sm" onclick="openQueueModal()">📋 待压制队列</button>
-    <button class="btn btn-ghost btn-sm" onclick="openInNewTab()" title="在新标签页打开">↗ 新窗口</button>
-    <button class="btn btn-ghost btn-sm" id="precisePreviewBtn" onclick="generatePrecisePreview()" title="生成与压制完全一致的预览">🔍 FFmpeg 精确预览</button>
-    <button class="btn btn-ghost btn-sm" id="jassubUpdateBtn" onclick="checkJassubUpdate()" title="检查 JASSUB 字幕渲染库更新">🔄 JASSUB 更新</button>
-    <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 添加到队列</button>
-  </div>
-</header>
 
-<div class="file-info" id="fileInfo">
-  <span>📹 视频: <span class="name" id="videoName">未加载</span></span>
-  <span>💬 字幕: <span class="name" id="subName">未加载</span></span>
-  <span id="audioStatus" style="display:none; color:#10b981;">🔊 音频加载中...</span>
-  <span id="renderMode" style="color:#3b82f6;">🎬 JASSUB 渲染</span>
-  <span id="renderModeHint" style="display:none; font-size:10px;"></span>
+<!-- Top Bar -->
+<div class="top-bar">
+  <button class="back-btn" onclick="window.location.href='/'" title="返回控制台">← 返回</button>
+  <div class="file-info" id="fileInfo">加载中...</div>
+  <span class="status-badge loading" id="statusBadge">加载字幕</span>
 </div>
 
-<div class="main-container">
-  <div class="video-section">
-    <div class="video-wrapper">
-      <video id="videoPlayer"></video>
-      <div class="subtitle-overlay" id="subtitleOverlay"></div>
-      <!-- Safe Area Guide -->
-      <div class="safe-area-guide" id="safeAreaGuide">
-        <div class="safe-area-border">
-          <span class="safe-area-label" id="safeAreaLabel">视频安全区</span>
-        </div>
-        <div class="safe-area-title">
-          <span class="safe-area-title-label">标题安全区 80%</span>
-        </div>
-        <div class="safe-area-grid">
-          <div class="hline" style="top:25%"></div>
-          <div class="hline" style="top:50%"></div>
-          <div class="hline" style="top:75%"></div>
-          <div class="vline" style="left:25%"></div>
-          <div class="vline" style="left:50%"></div>
-          <div class="vline" style="left:75%"></div>
-        </div>
-      </div>
-      <div class="loading" id="loading" style="display:none">
-        <div class="loading-spinner"></div>
-        <div>加载中...</div>
-      </div>
+<div class="main">
+  <!-- Video Area -->
+  <div class="video-area" id="videoArea">
+    <video id="video" controls preload="auto"></video>
+    <div class="ass-canvas-wrap" id="assCanvasWrap">
+      <canvas id="assCanvas"></canvas>
     </div>
-    <div class="video-controls">
-      <div class="progress-bar" id="progressBar">
-        <div class="progress-fill" id="progressFill"></div>
-      </div>
-      <div class="controls-row">
-        <button onclick="togglePlay()" id="playBtn">▶️</button>
-        <button onclick="seek(-5)">⏪</button>
-        <button onclick="seek(5)">⏩</button>
-        <div class="time-display">
-          <span class="current" id="currentTime">00:00</span>
-          <span> / </span>
-          <span id="duration">00:00</span>
-        </div>
-        <div class="volume-control">
-          <button onclick="toggleMute()" id="muteBtn">🔊</button>
-          <input type="range" id="volumeSlider" min="0" max="100" value="100" oninput="setVolume(this.value)">
-        </div>
-        <div class="speed-control">
-          <select id="speedSelect" onchange="setSpeed(this.value)">
-            <option value="0.5">0.5x</option>
-            <option value="0.75">0.75x</option>
-            <option value="1" selected>1x</option>
-            <option value="1.25">1.25x</option>
-            <option value="1.5">1.5x</option>
-            <option value="2">2x</option>
-          </select>
-        </div>
-        <button onclick="toggleSafeArea()" id="safeAreaBtn" title="显示/隐藏安全区参考线" style="background:transparent;border:1px solid #444;color:#999;cursor:pointer;font-size:11px;padding:3px 8px;border-radius:4px;white-space:nowrap;">📐 安全区</button>
-      </div>
+    <div class="video-loading" id="videoLoading">
+      <div class="spinner"></div>
+      <div class="load-text" id="loadText">正在加载视频...</div>
+    </div>
+    <div class="ffmpeg-loading" id="ffmpegLoading">
+      <div class="spinner"></div>
+      <div class="load-text">正在生成精确预览...</div>
     </div>
   </div>
 
-  <div class="control-panel">
-    <!-- 预设管理 -->
-    <div class="panel-section" style="background:#1a1a2e; border-bottom:2px solid #3b82f6;">
-      <h3><span class="icon">💾</span> 字幕预设</h3>
-      <div class="form-group">
-        <label>选择预设</label>
-        <div style="display:flex; gap:6px;">
-          <select id="presetSelect" onchange="loadPreset(this.value)" style="flex:1;">
-            <option value="">-- 选择预设 --</option>
-          </select>
-          <button class="btn btn-ghost btn-sm" onclick="refreshPresets()" title="刷新列表">🔄</button>
+  <!-- Side Panel -->
+  <div class="side-panel">
+    <div class="panel-header">
+      <h3>🎨 字幕样式</h3>
+      <div class="preview-mode-toggle">
+        <button class="active" id="modeJS" onclick="switchPreviewMode('js')">实时</button>
+        <button id="modeFFmpeg" onclick="switchPreviewMode('ffmpeg')">精确</button>
+      </div>
+    </div>
+
+    <div class="panel-scroll" id="controlsPanel">
+      <!-- Presets -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">预设</div>
+        <div class="preset-bar" id="presetBar"></div>
+      </div>
+
+      <!-- Font -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">字体</div>
+        <div class="ctrl-row">
+          <label>字体</label>
+          <select id="ctrlFont"><option value="">默认</option></select>
         </div>
-      </div>
-      <div style="display:flex; gap:6px; margin-top:8px;">
-        <button class="btn btn-primary btn-sm" onclick="showSavePresetDialog()" style="flex:1;">💾 保存当前</button>
-        <button class="btn btn-ghost btn-sm" onclick="showPresetManager()" style="flex:1;">📋 管理预设</button>
-      </div>
-    </div>
-
-    <!-- 内嵌字幕选择 -->
-    <div class="panel-section" id="embeddedSubSection" style="display:none; background:#1a2e1a; border-bottom:2px solid #10b981;">
-      <h3><span class="icon">📝</span> 内嵌字幕</h3>
-      <div class="form-group">
-        <label>选择字幕轨道</label>
-        <select id="embeddedSubSelect" onchange="loadEmbeddedSubtitle()">
-          <option value="">-- 加载内嵌字幕 --</option>
-        </select>
-      </div>
-      <div id="embeddedSubInfo" style="font-size:11px; color:#666; margin-top:4px;"></div>
-      <div style="margin-top:10px; display:flex; flex-direction:column; gap:6px;">
-        <button class="btn btn-ghost btn-sm" onclick="markDeleteAllSubtitles()" id="deleteAllSubBtn" style="width:100%; border-color:#ef4444; color:#ef4444;">🗑️ 删除全部内嵌字幕</button>
-        <button class="btn btn-ghost btn-sm" onclick="showRemoveSubtitlesModal()" id="deleteByLangBtn" style="width:100%;">🌐 按语言删除内嵌字幕</button>
-      </div>
-      <div id="subDeleteStatus" style="display:none; margin-top:8px; padding:8px; background:#1a1a2e; border:1px solid #f59e0b; border-radius:6px; font-size:11px; color:#f59e0b;">
-        <div id="subDeleteStatusText"></div>
-        <button onclick="clearRemoveSubtitles()" style="margin-top:4px; background:transparent; border:1px solid #f59e0b; color:#f59e0b; padding:2px 8px; border-radius:4px; cursor:pointer; font-size:10px;">↩️ 取消</button>
-      </div>
-    </div>
-
-    <!-- 时间偏移 -->
-    <div class="panel-section">
-      <h3><span class="icon">⏱️</span> 时间偏移</h3>
-      <div class="form-group">
-        <label>字幕偏移: <span id="timeOffsetVal">0</span>s</label>
-        <input type="range" id="timeOffset" min="-10" max="10" step="0.1" value="0" oninput="updateParams()">
-      </div>
-      <div style="display:flex; gap:4px; flex-wrap:wrap; margin-top:4px;">
-        <button class="preset-btn" onclick="setOffset(-2)">-2s</button>
-        <button class="preset-btn" onclick="setOffset(-1)">-1s</button>
-        <button class="preset-btn" onclick="setOffset(-0.5)">-0.5s</button>
-        <button class="preset-btn" onclick="setOffset(0)">0</button>
-        <button class="preset-btn" onclick="setOffset(0.5)">+0.5s</button>
-        <button class="preset-btn" onclick="setOffset(1)">+1s</button>
-        <button class="preset-btn" onclick="setOffset(2)">+2s</button>
-      </div>
-    </div>
-
-    <!-- 压制选项 -->
-    <div class="panel-section" style="background:#1a1a2e; border-bottom:2px solid #8b5cf6;">
-      <h3><span class="icon">🔥</span> 压制选项</h3>
-      <div style="display:flex; gap:8px;">
-        <div class="form-group" style="flex:1;">
-          <label>字幕模式</label>
-          <select id="burnSubMode">
-            <option value="burn" selected>硬字幕</option>
-            <option value="soft">软字幕</option>
-          </select>
+        <div class="ctrl-row">
+          <label>大小</label>
+          <input type="range" id="ctrlSize" min="10" max="120" value="48">
+          <span class="val" id="valSize">48</span>
         </div>
-        <div class="form-group" style="flex:1;">
-          <label>原字幕</label>
-          <select id="burnKeepOriginal">
-            <option value="false" selected>删除</option>
-            <option value="true">保留</option>
+        <div class="ctrl-row">
+          <label>颜色</label>
+          <input type="color" id="ctrlColor" value="#FFFFFF">
+          <span class="val" id="valColor">#FFFFFF</span>
+        </div>
+        <div class="ctrl-row">
+          <label>粗细</label>
+          <select id="ctrlWeight">
+            <option value="">默认</option>
+            <option value="bold">粗体</option>
+            <option value="normal">正常</option>
           </select>
         </div>
       </div>
-      <div class="form-group">
-        <label>字幕轨道名称（软字幕模式）</label>
-        <input type="text" id="burnSubName" value="中文字幕" placeholder="例如：中文字幕、English" style="width:100%; padding:7px 9px; border-radius:5px; border:1px solid var(--border); background:#222; color:var(--text); font-size:12px;">
-      </div>
-      <div style="display:flex; gap:8px;">
-        <div class="form-group" style="flex:1;">
-          <label>编码器</label>
-          <select id="burnCodec">
-            <option value="libx264">CPU · H.264</option>
-            <option value="libx265">CPU · H.265</option>
-            <option value="h264_nvenc">GPU · H.264</option>
-            <option value="hevc_nvenc">GPU · H.265</option>
-            <option value="h264_qsv">GPU · QSV H.264</option>
-          </select>
-        </div>
-        <div class="form-group" style="flex:1;">
-          <label>CRF</label>
-          <input type="number" id="burnCrf" value="18" min="0" max="51" style="width:100%; padding:7px 9px; border-radius:5px; border:1px solid var(--border); background:#222; color:var(--text); font-size:12px;">
-        </div>
-      </div>
-      <div class="form-group">
-        <label>编码预设</label>
-        <select id="burnPreset">
-          <option value="ultrafast">ultrafast（最快）</option>
-          <option value="superfast">superfast</option>
-          <option value="veryfast">veryfast</option>
-          <option value="faster">faster</option>
-          <option value="fast">fast</option>
-          <option value="medium" selected>medium（默认）</option>
-          <option value="slow">slow</option>
-          <option value="veryslow">veryslow（最慢）</option>
-        </select>
-      </div>
-    </div>
 
-    <!-- 位置调整 -->
-    <div class="panel-section">
-      <h3><span class="icon">📍</span> 位置调整</h3>
-      <div class="form-group">
-        <label>垂直位置</label>
-        <select id="positionY" onchange="updateParams()">
-          <option value="bottom">底部（默认）</option>
-          <option value="top">顶部</option>
-          <option value="center">居中</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>底部边距: <span id="marginBottomVal">30</span>px</label>
-        <input type="range" id="marginBottom" min="0" max="200" value="30" oninput="updateParams()">
-      </div>
-      <div class="form-group">
-        <label>顶部边距: <span id="marginTopVal">30</span>px</label>
-        <input type="range" id="marginTop" min="0" max="200" value="30" oninput="updateParams()">
-      </div>
-    </div>
-
-    <!-- 字体样式 -->
-    <div class="panel-section">
-      <h3><span class="icon">🔤</span> 字体样式</h3>
-      <div class="form-group">
-        <label>字体大小: <span id="fontSizeVal">24</span>px</label>
-        <input type="range" id="fontSize" min="12" max="72" value="24" oninput="updateParams()">
-      </div>
-      <div class="form-group">
-        <label>字体族</label>
-        <select id="fontFamily" onchange="updateParams()">
-          <option value="sans-serif">加载中...</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>字体颜色</label>
-        <div class="color-input">
-          <input type="color" id="fontColor" value="#ffffff" onchange="updateParams()">
-          <input type="text" id="fontColorText" value="#ffffff" onchange="document.getElementById('fontColor').value=this.value; updateParams()">
+      <!-- Outline & Shadow -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">描边 & 阴影</div>
+        <div class="ctrl-row">
+          <label>描边宽</label>
+          <input type="range" id="ctrlOutline" min="0" max="8" value="2" step="0.5">
+          <span class="val" id="valOutline">2</span>
+        </div>
+        <div class="ctrl-row">
+          <label>描边色</label>
+          <input type="color" id="ctrlOutlineColor" value="#000000">
+        </div>
+        <div class="ctrl-row">
+          <label>阴影</label>
+          <input type="range" id="ctrlShadow" min="0" max="8" value="1" step="0.5">
+          <span class="val" id="valShadow">1</span>
         </div>
       </div>
-      <div class="form-group">
-        <label>字体粗细</label>
-        <select id="fontWeight" onchange="updateParams()">
-          <option value="normal">正常</option>
-          <option value="bold" selected>粗体</option>
-          <option value="lighter">细体</option>
-        </select>
-      </div>
-    </div>
 
-    <!-- 描边与阴影 -->
-    <div class="panel-section">
-      <h3><span class="icon">✨</span> 描边与阴影</h3>
-      <div class="form-group">
-        <label>描边宽度: <span id="outlineWidthVal">2</span>px</label>
-        <input type="range" id="outlineWidth" min="0" max="10" value="2" oninput="updateParams()">
-      </div>
-      <div class="form-group">
-        <label>描边颜色</label>
-        <div class="color-input">
-          <input type="color" id="outlineColor" value="#000000" onchange="updateParams()">
-          <input type="text" id="outlineColorText" value="#000000" onchange="document.getElementById('outlineColor').value=this.value; updateParams()">
+      <!-- Position -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">位置</div>
+        <div class="ctrl-row">
+          <label>垂直位置</label>
+          <input type="range" id="ctrlPosY" min="0" max="100" value="90">
+          <span class="val" id="valPosY">90%</span>
+        </div>
+        <div class="ctrl-row">
+          <label>底边距</label>
+          <input type="range" id="ctrlMarginBottom" min="0" max="100" value="20">
+          <span class="val" id="valMarginBottom">20</span>
         </div>
       </div>
-      <div class="form-group">
-        <label>阴影偏移: <span id="shadowOffsetVal">2</span>px</label>
-        <input type="range" id="shadowOffset" min="0" max="10" value="2" oninput="updateParams()">
-      </div>
-      <div class="form-group">
-        <label>背景透明度: <span id="bgOpacityVal">0</span>%</label>
-        <input type="range" id="bgOpacity" min="0" max="100" value="0" oninput="updateParams()">
-      </div>
-    </div>
 
-    <!-- 快捷键 -->
-    <div class="shortcuts">
-      <div><kbd>Space</kbd> 播放/暂停 <kbd>←</kbd><kbd>→</kbd> 快退/进5s</div>
-      <div><kbd>↑</kbd><kbd>↓</kbd> 偏移±0.5s <kbd>[</kbd><kbd>]</kbd> 字号±2px</div>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
-<!-- 媒体浏览器弹窗 -->
-<div class="modal-overlay" id="mediaModal">
-  <div class="modal">
-    <div class="modal-header">
-      <h3 id="modalTitle">📁 选择文件</h3>
-      <button class="modal-close" onclick="closeMediaBrowser()">✕</button>
-    </div>
-    <div class="modal-breadcrumb" id="modalBreadcrumb">📁 /</div>
-    <div class="modal-list" id="modalList">
-      <div style="text-align:center; color:#666; padding:40px;">加载中...</div>
-    </div>
-    <div class="modal-footer">
-      <span class="selection-info" id="selectionInfo">点击选择文件</span>
-      <div class="actions">
-        <button class="btn btn-ghost btn-sm" onclick="closeMediaBrowser()">取消</button>
-        <button class="btn btn-primary btn-sm" id="confirmBtn" onclick="confirmSelection()" disabled>确认选择</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 待压制队列弹窗 -->
-<div class="modal-overlay" id="queueModal">
-  <div class="modal" style="width:700px; max-height:80vh;">
-    <div class="modal-header">
-      <h3>📋 待压制队列</h3>
-      <button class="modal-close" onclick="closeQueueModal()">✕</button>
-    </div>
-    <div class="modal-list" id="queueList" style="min-height:200px;">
-      <div style="text-align:center; color:#666; padding:40px;">队列为空</div>
-    </div>
-    <div class="modal-footer">
-      <span class="selection-info" id="queueInfo">共 0 个任务</span>
-      <div class="actions">
-        <button class="btn btn-ghost btn-sm" onclick="clearQueue()">清空队列</button>
-        <button class="btn btn-primary btn-sm" id="startBurnBtn" onclick="startBatchBurn()" disabled>🔥 开始压制</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 保存预设弹窗 -->
-<div class="modal-overlay" id="savePresetModal">
-  <div class="modal" style="width:450px; max-height:80vh; display:flex; flex-direction:column;">
-    <div class="modal-header" style="flex-shrink:0;">
-      <h3>💾 保存字幕预设</h3>
-      <button class="modal-close" onclick="closeSavePresetDialog()">✕</button>
-    </div>
-    <div style="padding:20px; overflow-y:auto; flex:1; min-height:0;">
-      <div style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:10px;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;">
-          <input type="radio" name="saveMode" value="new" checked onchange="toggleSaveMode()" style="width:14px; height:14px;">
-          <span style="color:#e5e5e5; font-size:12px;">保存为新预设</span>
-        </label>
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="saveMode" value="overwrite" onchange="toggleSaveMode()" style="width:14px; height:14px;">
-          <span style="color:#e5e5e5; font-size:12px;">覆盖已有预设</span>
-        </label>
-        <div id="overwriteSelectWrap" style="display:none; margin-top:8px;">
-          <select id="overwritePresetSelect" onchange="onOverwritePresetChange()" style="width:100%; padding:8px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
-            <option value="">-- 选择要覆盖的预设 --</option>
-          </select>
+      <!-- Background -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">背景</div>
+        <div class="ctrl-row">
+          <label>不透明度</label>
+          <input type="range" id="ctrlBgOpacity" min="0" max="100" value="0">
+          <span class="val" id="valBgOpacity">0%</span>
+        </div>
+        <div id="assBgHint" style="display:none; font-size:11px; color:var(--warning); margin-top:4px;">
+          ⚠️ ASS 格式不支持背景不透明度（使用 ASS 样式自带的背景）
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:16px;">
-        <label style="display:block; margin-bottom:6px; color:#e5e5e5; font-size:13px;">预设名称 *</label>
-        <input type="text" id="presetName" placeholder="例如：电视剧标准、电影大字幕" style="width:100%; padding:10px; background:#222; border:1px solid #444; border-radius:6px; color:#e5e5e5; font-size:13px;">
-      </div>
-      <div class="form-group" style="margin-bottom:16px;">
-        <label style="display:block; margin-bottom:6px; color:#e5e5e5; font-size:13px;">描述（可选）</label>
-        <textarea id="presetDescription" placeholder="预设的用途说明..." rows="3" style="width:100%; padding:10px; background:#222; border:1px solid #444; border-radius:6px; color:#e5e5e5; font-size:13px; resize:vertical;"></textarea>
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="presetIsDefault" style="width:16px; height:16px;">
-          <span style="color:#e5e5e5; font-size:13px;">设为默认预设</span>
-        </label>
-      </div>
-      <div style="margin-bottom:16px;">
-        <div style="color:#e5e5e5; font-size:13px; font-weight:500; margin-bottom:8px;">保存范围：</div>
-        <div style="display:flex; gap:12px; flex-wrap:wrap;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
-            <input type="checkbox" class="preset-category" value="subtitle_style" checked style="width:14px; height:14px;">
-            字幕样式
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
-            <input type="checkbox" class="preset-category" value="burn_options" checked style="width:14px; height:14px;">
-            压制选项
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
-            <input type="checkbox" class="preset-category" value="time_offset" checked style="width:14px; height:14px;">
-            时间偏移
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:#ccc;">
-            <input type="checkbox" class="preset-category" value="subtitle_keep" checked onchange="toggleSubtitleKeepSection()" style="width:14px; height:14px;">
-            内嵌字幕保留
-          </label>
+
+      <!-- Time Offset -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">时间偏移</div>
+        <div class="ctrl-row">
+          <label>偏移(s)</label>
+          <input type="number" id="ctrlTimeOffset" value="0" step="0.1" min="-999" max="999">
+          <span class="val" id="valTimeOffset">0s</span>
         </div>
       </div>
-      <div id="subtitleKeepSection" style="margin-bottom:16px; background:#1a2e1a; border:1px solid #10b981; border-radius:8px; padding:12px; display:none;">
-        <div style="color:#10b981; font-size:12px; font-weight:500; margin-bottom:8px;">🎬 内嵌字幕处理</div>
-        <div style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;">
-          <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
-            <input type="radio" name="subKeepMode" value="all_except" checked onchange="toggleSubKeepMode(); updatePresetPreview();"> 保留指定语言，删除其他
-          </label>
-          <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
-            <input type="radio" name="subKeepMode" value="delete_selected" onchange="toggleSubKeepMode(); updatePresetPreview();"> 删除指定语言，保留其他
-          </label>
-          <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-size:11px; color:#ccc;">
-            <input type="radio" name="subKeepMode" value="delete_all" onchange="toggleSubKeepMode(); updatePresetPreview();"> 删除全部内嵌字幕
-          </label>
-        </div>
-        <div id="subKeepLangSection">
-          <div style="font-size:11px; color:#999; margin-bottom:6px;">
-            输入要保留/删除的语言代码（逗号分隔）：<br>
-            <span style="color:#10b981;">常用：chi=中文, eng=英文, jpn=日文, kor=韩文, fre=法文, ger=德文, spa=西文</span>
-          </div>
-          <input type="text" id="subKeepLanguages" placeholder="例如: chi,eng" oninput="updatePresetPreview()" style="width:100%; padding:6px 10px; background:#222; border:1px solid #444; border-radius:4px; color:#e5e5e5; font-size:12px;">
+
+      <!-- FFmpeg Precise Preview -->
+      <div class="ctrl-section">
+        <div class="ctrl-section-title">精确预览</div>
+        <button class="ffmpeg-btn" id="btnFFmpegPreview" onclick="generateFFmpegPreview()">
+          🔍 生成精确预览 (FFmpeg)
+        </button>
+        <div style="font-size:11px; color:var(--text2); margin-top:6px;">
+          使用 FFmpeg 生成 960p 短片，字幕效果与最终压制完全一致
         </div>
       </div>
-      <div style="background:#222; border-radius:6px; padding:12px; margin-bottom:16px; font-size:12px; color:#999; max-height:200px; overflow-y:auto;">
-        <div style="margin-bottom:8px; color:#e5e5e5; font-weight:500;">当前参数预览：</div>
-        <div id="presetPreview" style="line-height:1.8;"></div>
-      </div>
     </div>
-    <div class="modal-footer" style="flex-shrink:0; border-top:1px solid #333; padding:12px 20px; display:flex; gap:8px; justify-content:flex-end;">
-      <button class="btn btn-ghost btn-sm" onclick="closeSavePresetDialog()">取消</button>
-      <button class="btn btn-primary btn-sm" onclick="savePreset()">💾 保存</button>
+
+    <!-- Cache info -->
+    <div class="cache-info" id="cacheInfo">
+      <span class="cache-dot miss" id="cacheDot"></span>
+      <span id="cacheText">无缓存</span>
     </div>
-  </div>
-</div>
 
-<!-- 管理预设弹窗 -->
-<div class="modal-overlay" id="presetManagerModal">
-  <div class="modal" style="width:600px; max-height:80vh;">
-    <div class="modal-header">
-      <h3>📋 字幕预设管理</h3>
-      <button class="modal-close" onclick="closePresetManager()">✕</button>
-    </div>
-    <div class="modal-list" id="presetManagerList" style="min-height:200px;">
-      <div style="text-align:center; color:#666; padding:40px;">加载中...</div>
-    </div>
-    <div class="modal-footer">
-      <span class="selection-info" id="presetManagerInfo">共 0 个预设</span>
-      <div class="actions">
-        <button class="btn btn-ghost btn-sm" onclick="closePresetManager()">关闭</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 编辑预设弹窗 -->
-<div class="modal-overlay" id="editPresetModal">
-  <div class="modal" style="width:500px;">
-    <div class="modal-header">
-      <h3>✏️ 编辑预设</h3>
-      <button class="modal-close" onclick="closeEditPresetDialog()">✕</button>
-    </div>
-    <div style="padding:20px;">
-      <input type="hidden" id="editPresetId">
-      <div class="form-group" style="margin-bottom:16px;">
-        <label style="display:block; margin-bottom:6px; color:#e5e5e5; font-size:13px;">预设名称</label>
-        <input type="text" id="editPresetName" style="width:100%; padding:10px; background:#222; border:1px solid #444; border-radius:6px; color:#e5e5e5; font-size:13px;">
-      </div>
-      <div class="form-group" style="margin-bottom:16px;">
-        <label style="display:block; margin-bottom:6px; color:#e5e5e5; font-size:13px;">描述</label>
-        <textarea id="editPresetDescription" rows="3" style="width:100%; padding:10px; background:#222; border:1px solid #444; border-radius:6px; color:#e5e5e5; font-size:13px; resize:vertical;"></textarea>
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="checkbox" id="editPresetIsDefault" style="width:16px; height:16px;">
-          <span style="color:#e5e5e5; font-size:13px;">设为默认预设</span>
-        </label>
-      </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn btn-ghost btn-sm" onclick="closeEditPresetDialog()">取消</button>
-        <button class="btn btn-primary btn-sm" onclick="updatePreset()">💾 保存修改</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- 删除内嵌字幕弹窗 -->
-<div class="modal-overlay" id="removeSubtitlesModal">
-  <div class="modal" style="width:500px;">
-    <div class="modal-header">
-      <h3>🗑️ 删除内嵌字幕</h3>
-      <button class="modal-close" onclick="closeRemoveSubtitlesModal()">✕</button>
-    </div>
-    <div style="padding:20px;">
-      <div style="margin-bottom:16px; color:#999; font-size:13px;">
-        删除操作将在压制时生效，不会修改原始文件
-      </div>
-      <div style="margin-bottom:16px;">
-        <div style="display:flex; gap:12px; margin-bottom:12px;">
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; color:#e5e5e5;">
-            <input type="radio" name="removeMode" value="all" checked onchange="toggleRemoveMode()"> 删除所有字幕
-          </label>
-          <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; color:#e5e5e5;">
-            <input type="radio" name="removeMode" value="select" onchange="toggleRemoveMode()"> 按语言选择保留
-          </label>
-        </div>
-        <div id="removeSubtitlesList" style="max-height:300px; overflow-y:auto; display:none;">
-          <!-- 字幕轨道列表会动态生成 -->
-        </div>
-      </div>
-      <div style="background:#1a1a2e; border:1px solid #333; border-radius:6px; padding:10px; margin-bottom:16px; font-size:11px; color:#999;">
-        💡 提示：删除操作仅标记，在压制视频时才会从输出文件中移除选中的字幕轨道
-      </div>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button class="btn btn-ghost btn-sm" onclick="closeRemoveSubtitlesModal()">取消</button>
-        <button class="btn btn-primary btn-sm" onclick="executeRemoveSubtitles()" style="background:#ef4444;">🗑️ 确认删除</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<input type="file" id="videoInput" accept="video/*" style="display:none">
-<input type="file" id="subInput" accept=".srt,.vtt,.ass,.ssa,.sub" style="display:none">
-
-<script>
-// 状态管理
-const state = {
-  videoPath: null,
-  subtitlePath: null,
-  subtitleContent: null,
-  subtitleType: null,
-  parsedSubtitles: [],
-  currentSubtitleIndex: -1,
-  videoDuration: 0,           // 从 probe 获取的完整视频时长
-  needAudioTranscode: false,  // 是否需要转码音频
-  audioInitialized: false,   // 音频事件是否已初始化
-  currentSegmentStart: 0,     // 当前片段的起始时间
-  segmentDuration: 20,        // 片段时长
-  audioElement: null,         // 音频元素
-  mediaSource: null,          // MediaSource 实例
-  sourceBuffer: null,         // SourceBuffer 实例
-  audioSegments: [],          // 已加载的音频片段
-  nextSegmentToLoad: 0,       // 下一个要加载的片段起始时间
-  burnQueue: [],              // 待压制队列
-  jassubRenderer: null,       // JASSUB 渲染器实例
-  params: {
-    timeOffset: 0,
-    positionY: 'bottom',
-    marginBottom: 30,
-    marginTop: 30,
-    fontSize: 24,
-    fontFamily: 'sans-serif',
-    fontColor: '#ffffff',
-    fontWeight: 'bold',
-    outlineWidth: 2,
-    outlineColor: '#000000',
-    shadowOffset: 2,
-    bgOpacity: 0
-  }
-};
-
-// 媒体浏览器状态
-let mediaBrowserMode = '';
-let mediaBrowserPath = '';
-let mediaBrowserSelected = null;
-
-// DOM元素
-const video = document.getElementById('videoPlayer');
-const overlay = document.getElementById('subtitleOverlay');
-
-// 安全区状态
-let safeAreaVisible = false;
-
-// 更新安全区位置
-function updateSafeArea() {
-  const guide = document.getElementById('safeAreaGuide');
-  if (!guide || !guide.classList.contains('visible')) return;
-  
-  const info = getVideoDisplayInfo();
-  if (!info) return;
-
-  guide.style.left = info.offsetX + 'px';
-  guide.style.top = info.offsetY + 'px';
-  guide.style.width = info.displayW + 'px';
-  guide.style.height = info.displayH + 'px';
-
-  document.getElementById('safeAreaLabel').textContent =
-    `视频安全区 ${info.vw}×${info.vh}`;
-}
-
-// 切换安全区显示
-function toggleSafeArea() {
-  safeAreaVisible = !safeAreaVisible;
-  const guide = document.getElementById('safeAreaGuide');
-  const btn = document.getElementById('safeAreaBtn');
-  if (safeAreaVisible) {
-    guide.classList.add('visible');
-    btn.style.borderColor = '#3b82f6';
-    btn.style.color = '#3b82f6';
-    updateSafeArea();
-  } else {
-    guide.classList.remove('visible');
-    btn.style.borderColor = '#444';
-    btn.style.color = '#999';
-  }
-}
-
-// 窗口 resize 时更新安全区和字幕
-window.addEventListener('resize', () => {
-  if (safeAreaVisible) updateSafeArea();
-  // 重新渲染字幕以更新缩放和位置
-  state.currentSubtitleIndex = -1;
-  updateSubtitleDisplay();
-});
-
-// 检测是否嵌入模式
-function isEmbedded() {
-  return window.self !== window.top;
-}
-
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-  if (isEmbedded()) {
-    document.body.classList.add('embedded');
-    // 嵌入模式下只隐藏标题和返回按钮，保留操作按钮
-    document.getElementById('backBtn').style.display = 'none';
-    document.getElementById('headerTitle').style.display = 'none';
-  }
-  loadSavedParams();
-  
-  // 加载保存的压制设置
-  loadBurnSettings();
-  
-  // 从 localStorage 恢复队列
-  try {
-    const savedQueue = localStorage.getItem('burnQueue');
-    if (savedQueue) {
-      state.burnQueue = JSON.parse(savedQueue);
-    }
-  } catch (e) {
-    console.error('Failed to load burn queue:', e);
-  }
-  
-  setupVideoEvents();
-  setupKeyboardShortcuts();
-  
-  // 加载预设列表
-  refreshPresets();
-  
-  // 恢复删除字幕标记状态
-  updateSubDeleteStatus();
-});
-
-// Toast提示
-function showToast(msg, type = 'success') {
-  const toast = document.getElementById('toast');
-  toast.textContent = msg;
-  toast.className = `toast ${type} show`;
-  setTimeout(() => toast.classList.remove('show'), 3000);
-}
-
-// 格式化时间
-function formatTime(seconds) {
-  if (isNaN(seconds)) return '00:00';
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-}
-
-// 格式化文件大小
-function formatSize(bytes) {
-  if (!bytes) return '';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let i = 0;
-  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
-  return bytes.toFixed(1) + ' ' + units[i];
-}
-
-// 加载保存的参数
-function loadSavedParams() {
-  const saved = localStorage.getItem('subtitlePreviewParams');
-  if (saved) {
-    try {
-      const params = JSON.parse(saved);
-      Object.assign(state.params, params);
-      updateUIFromParams();
-    } catch (e) {
-      console.error('Failed to load saved params:', e);
-    }
-  }
-}
-
-// 加载保存的压制设置
-function loadBurnSettings() {
-  const saved = localStorage.getItem('burnSettings');
-  if (saved) {
-    try {
-      const settings = JSON.parse(saved);
-      if (settings.sub_mode) document.getElementById('burnSubMode').value = settings.sub_mode;
-      if (settings.keep_original_sub !== undefined) document.getElementById('burnKeepOriginal').value = settings.keep_original_sub ? 'true' : 'false';
-      if (settings.sub_name) document.getElementById('burnSubName').value = settings.sub_name;
-      if (settings.codec) document.getElementById('burnCodec').value = settings.codec;
-      if (settings.crf) document.getElementById('burnCrf').value = settings.crf;
-      if (settings.preset) document.getElementById('burnPreset').value = settings.preset;
-    } catch (e) {
-      console.error('Failed to load burn settings:', e);
-    }
-  }
-}
-
-// 从UI保存压制设置到localStorage
-function loadBurnSettingsFromUI() {
-  const settings = {
-    sub_mode: document.getElementById('burnSubMode').value,
-    keep_original_sub: document.getElementById('burnKeepOriginal').value === 'true',
-    sub_name: document.getElementById('burnSubName').value,
-    codec: document.getElementById('burnCodec').value,
-    crf: document.getElementById('burnCrf').value,
-    preset: document.getElementById('burnPreset').value,
-  };
-  localStorage.setItem('burnSettings', JSON.stringify(settings));
-}
-
-// 从参数更新UI
-function updateUIFromParams() {
-  const p = state.params;
-  document.getElementById('timeOffset').value = p.timeOffset || 0;
-  document.getElementById('positionY').value = p.positionY || 'bottom';
-  document.getElementById('marginBottom').value = p.marginBottom || 30;
-  document.getElementById('marginTop').value = p.marginTop || 30;
-  document.getElementById('fontSize').value = p.fontSize || 24;
-  document.getElementById('fontFamily').value = p.fontFamily || 'sans-serif';
-  document.getElementById('fontColor').value = p.fontColor || '#ffffff';
-  document.getElementById('fontWeight').value = p.fontWeight || 'bold';
-  document.getElementById('outlineWidth').value = p.outlineWidth || 2;
-  document.getElementById('outlineColor').value = p.outlineColor || '#000000';
-  document.getElementById('shadowOffset').value = p.shadowOffset || 2;
-  document.getElementById('bgOpacity').value = p.bgOpacity || 0;
-  
-  // 更新显示值
-  document.getElementById('timeOffsetVal').textContent = (p.timeOffset || 0).toFixed(1);
-  document.getElementById('marginBottomVal').textContent = p.marginBottom || 30;
-  document.getElementById('marginTopVal').textContent = p.marginTop || 30;
-  document.getElementById('fontSizeVal').textContent = p.fontSize || 24;
-  document.getElementById('outlineWidthVal').textContent = p.outlineWidth || 2;
-  document.getElementById('shadowOffsetVal').textContent = p.shadowOffset || 2;
-  document.getElementById('bgOpacityVal').textContent = p.bgOpacity || 0;
-  document.getElementById('fontColorText').value = p.fontColor || '#ffffff';
-  document.getElementById('outlineColorText').value = p.outlineColor || '#000000';
-}
-
-// 更新参数
-function updateParams() {
-  state.params.timeOffset = parseFloat(document.getElementById('timeOffset').value) || 0;
-  state.params.positionY = document.getElementById('positionY').value;
-  state.params.marginBottom = parseInt(document.getElementById('marginBottom').value) || 30;
-  state.params.marginTop = parseInt(document.getElementById('marginTop').value) || 30;
-  state.params.fontSize = parseInt(document.getElementById('fontSize').value) || 24;
-  state.params.fontFamily = document.getElementById('fontFamily').value;
-  state.params.fontColor = document.getElementById('fontColor').value;
-  state.params.fontWeight = document.getElementById('fontWeight').value;
-  state.params.outlineWidth = parseInt(document.getElementById('outlineWidth').value) || 0;
-  state.params.outlineColor = document.getElementById('outlineColor').value;
-  state.params.shadowOffset = parseInt(document.getElementById('shadowOffset').value) || 0;
-  state.params.bgOpacity = parseInt(document.getElementById('bgOpacity').value) || 0;
-  
-  // 更新显示值
-  document.getElementById('timeOffsetVal').textContent = state.params.timeOffset.toFixed(1);
-  document.getElementById('marginBottomVal').textContent = state.params.marginBottom;
-  document.getElementById('marginTopVal').textContent = state.params.marginTop;
-  document.getElementById('fontSizeVal').textContent = state.params.fontSize;
-  document.getElementById('outlineWidthVal').textContent = state.params.outlineWidth;
-  document.getElementById('shadowOffsetVal').textContent = state.params.shadowOffset;
-  document.getElementById('bgOpacityVal').textContent = state.params.bgOpacity;
-  
-  // 保存参数到 localStorage
-  localStorage.setItem('subtitlePreviewParams', JSON.stringify(state.params));
-  
-  // 只有 SRT/VTT 模式才更新 JASSUB 样式（ASS 保留原始样式）
-  if (state.jassubStyleMode === 'custom') {
-    updateJASSUBStyle();
-  }
-  
-  state.currentSubtitleIndex = -1;
-  updateSubtitleDisplay();
-}
-
-// 设置偏移量
-function setOffset(value) {
-  document.getElementById('timeOffset').value = value;
-  updateParams();
-}
-
-// ===== FFmpeg 精确预览 =====
-let _precisePreviewAbort = null;
-let _precisePreviewActive = false;
-let _savedVideoTime = 0;
-let _savedVideoSrc = '';
-
-async function generatePrecisePreview() {
-  if (!state.videoPath || !state.subtitlePath) {
-    showToast('请先加载视频和字幕', 'error');
-    return;
-  }
-  
-  const btn = document.getElementById('precisePreviewBtn');
-  const start = Math.max(0, Math.floor(video.currentTime || 0));
-  const duration = 10;
-  
-  // 取消上一次请求
-  if (_precisePreviewAbort) _precisePreviewAbort.abort();
-  _precisePreviewAbort = new AbortController();
-  
-  // 按钮状态 + 提示
-  btn.disabled = true;
-  btn.textContent = '⏳ 生成中...';
-  showToast('⏳ 正在生成精确预览（约 6 秒）...', 'info');
-  
-  try {
-    const fd = new FormData();
-    fd.append('video_path', state.videoPath);
-    fd.append('subtitle_path', state.subtitlePath);
-    fd.append('start', start);
-    fd.append('duration', duration);
-    fd.append('preview_params', JSON.stringify(state.params));
-    
-    const resp = await fetch('/api/preview', {
-      method: 'POST',
-      body: fd,
-      signal: _precisePreviewAbort.signal
-    });
-    
-    if (!resp.ok) {
-      const err = await resp.text();
-      showToast('❌ 预览生成失败: ' + err.slice(0, 100), 'error');
-      return;
-    }
-    
-    // 直接用响应 blob 作为视频源
-    const blob = await resp.blob();
-    const previewUrl = URL.createObjectURL(blob);
-    
-    // 保存当前状态
-    _savedVideoTime = video.currentTime;
-    _savedVideoSrc = video.src;
-    _precisePreviewActive = true;
-    
-    // 隐藏 JS 字幕叠加（字幕已烧入预览视频）
-    const overlay = document.getElementById('subtitleOverlay');
-    if (overlay) overlay.style.display = 'none';
-    
-    // 替换视频源为精确预览
-    const wasPlaying = !video.paused;
-    video.src = previewUrl;
-    video.load();
-    video.onloadeddata = () => {
-      video.currentTime = 0;
-      if (wasPlaying) video.play();
-      video.onloadeddata = null;
-    };
-    
-    showToast('✅ 精确预览已就绪', 'success');
-    
-    // 监听播放结束，自动切回 JS 预览
-    video.addEventListener('ended', _onPrecisePreviewEnded);
-    
-  } catch (e) {
-    if (e.name !== 'AbortError') {
-      console.error('[精确预览] 错误:', e);
-      showToast('❌ 预览生成失败', 'error');
-    }
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🔍 精确预览';
-  }
-}
-
-function _onPrecisePreviewEnded() {
-  video.removeEventListener('ended', _onPrecisePreviewEnded);
-  // 恢复 JS 预览，从精确预览结束的位置继续
-  _restoreAfterPrecisePreview();
-}
-
-function _restoreAfterPrecisePreview() {
-  _precisePreviewActive = false;
-  const overlay = document.getElementById('subtitleOverlay');
-  if (overlay) overlay.style.display = '';
-  
-  // 恢复原始视频源
-  if (state.videoPath) {
-    const videoUrl = '/api/media/stream?path=' + encodeURIComponent(state.videoPath);
-    video.src = videoUrl;
-    video.load();
-    video.onloadeddata = () => {
-      // 跳到精确预览结束的位置
-      const seekTime = _savedVideoTime + 10;
-      video.currentTime = seekTime < (video.duration || Infinity) ? seekTime : _savedVideoTime;
-      video.play();
-      video.onloadeddata = null;
-    };
-  }
-}
-
-// 视频事件
-function setupVideoEvents() {
-  video.addEventListener('timeupdate', () => {
-    // 使用 video.duration（实际视频时长）
-    const duration = video.duration;
-    if (!duration || isNaN(duration) || !isFinite(duration)) return;
-    
-    // 直接使用 video.currentTime（视频是完整加载的）
-    const percent = (video.currentTime / duration) * 100;
-    document.getElementById('progressFill').style.width = percent + '%';
-    document.getElementById('currentTime').textContent = formatTime(video.currentTime);
-    updateSubtitleDisplay();
-    
-    // 音频片段管理
-    if (state.needAudioTranscode && state.audioElement && !audioLoading) {
-      const currentTime = video.currentTime;
-      const segmentDuration = state.segmentDuration || 20;
-      const currentStart = state.currentSegmentStart || 0;
-      const currentEnd = currentStart + segmentDuration;
-      
-      // 当播放时间超过当前片段结束时间时，加载下一个片段
-      if (currentTime >= currentEnd) {
-        console.log(`[audio] segment ended, loading next from ${currentEnd}s`);
-        loadAudioForSegment(state.videoPath, currentEnd);
-      }
-      // 距离片段结束还有 5 秒时，预加载下一个片段（仅对 MSE 模式有效）
-      else if (state.sourceBuffer && currentTime > currentEnd - 5 && !state.sourceBuffer.updating) {
-        console.log(`[audio] preloading next segment from ${currentEnd}s`);
-        loadAudioSegmentToMSE(state.videoPath, currentEnd);
-      }
-    }
-  });
-  
-  video.addEventListener('loadedmetadata', () => {
-    // 显示视频时长
-    if (video.duration && isFinite(video.duration)) {
-      document.getElementById('duration').textContent = formatTime(video.duration);
-      // 更新 state.videoDuration 为实际时长
-      state.videoDuration = video.duration;
-    }
-    // 更新安全区
-    updateSafeArea();
-  });
-  
-  // 添加 durationchange 事件
-  video.addEventListener('durationchange', () => {
-    if (video.duration && isFinite(video.duration)) {
-      document.getElementById('duration').textContent = formatTime(video.duration);
-      state.videoDuration = video.duration;
-    }
-  });
-  
-  video.addEventListener('play', () => {
-    document.getElementById('playBtn').textContent = '⏸️';
-  });
-  
-  video.addEventListener('pause', () => {
-    document.getElementById('playBtn').textContent = '▶️';
-  });
-  
-  // 进度条点击和拖动
-  const progressBar = document.getElementById('progressBar');
-  let isDragging = false;
-  
-  function getDuration() {
-    // 优先使用 video.duration（实际时长）
-    return video.duration || state.videoDuration;
-  }
-  
-  function updateProgress(e) {
-    const rect = progressBar.getBoundingClientRect();
-    const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const duration = getDuration();
-    if (duration && duration > 0 && isFinite(duration)) {
-      // 计算目标时间
-      const targetTime = percent * duration;
-      
-      // 直接跳转到目标时间（视频是完整加载的）
-      video.currentTime = targetTime;
-      
-      // 如果需要转码音频，检查是否需要加载新片段
-      if (state.needAudioTranscode) {
-        onSeekToPosition(percent);
-      }
-    }
-  }
-  
-  progressBar.addEventListener('click', (e) => {
-    updateProgress(e);
-  });
-  
-  progressBar.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    updateProgress(e);
-    e.preventDefault(); // 防止选中文本
-  });
-  
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    updateProgress(e);
-  });
-  
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-  });
-}
-
-// 视频控制
-function togglePlay() {
-  if (video.paused) {
-    video.play();
-  } else {
-    video.pause();
-  }
-}
-
-function seek(seconds) {
-  video.currentTime += seconds;
-}
-
-function toggleMute() {
-  video.muted = !video.muted;
-  document.getElementById('muteBtn').textContent = video.muted ? '🔇' : '🔊';
-  document.getElementById('volumeSlider').value = video.muted ? 0 : video.volume * 100;
-}
-
-function setVolume(value) {
-  video.volume = value / 100;
-  video.muted = value === 0;
-  document.getElementById('muteBtn').textContent = value === 0 ? '🔇' : '🔊';
-}
-
-function setSpeed(value) {
-  video.playbackRate = parseFloat(value);
-}
-
-// 键盘快捷键
-function setupKeyboardShortcuts() {
-  document.addEventListener('keydown', (e) => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
-    
-    switch (e.key) {
-      case ' ':
-        e.preventDefault();
-        togglePlay();
-        break;
-      case 'ArrowLeft':
-        e.preventDefault();
-        seek(-5);
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        seek(5);
-        break;
-      case 'ArrowUp':
-        e.preventDefault();
-        setOffset(state.params.timeOffset + 0.5);
-        break;
-      case 'ArrowDown':
-        e.preventDefault();
-        setOffset(state.params.timeOffset - 0.5);
-        break;
-      case '[':
-        document.getElementById('fontSize').value = Math.max(12, state.params.fontSize - 2);
-        updateParams();
-        break;
-      case ']':
-        document.getElementById('fontSize').value = Math.min(72, state.params.fontSize + 2);
-        updateParams();
-        break;
-    }
-  });
-}
-
-// 加载本地视频
-function loadLocalVideo() {
-  document.getElementById('videoInput').click();
-}
-
-document.getElementById('videoInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  
-  const url = URL.createObjectURL(file);
-  video.src = url;
-  state.videoPath = file.name;
-  document.getElementById('videoName').textContent = file.name;
-  showToast('视频已加载: ' + file.name);
-});
-
-// 加载本地字幕
-function loadLocalSubtitle() {
-  document.getElementById('subInput').click();
-}
-
-document.getElementById('subInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    state.subtitleContent = ev.target.result;
-    state.subtitlePath = file.name;
-    state.subtitleType = detectSubtitleType(file.name);
-    parseSubtitle();
-    updateFormatHint();
-    
-    // 初始化 JASSUB 渲染器
-    initJASSUB(state.subtitleContent, state.subtitleType);
-    
-    document.getElementById('subName').textContent = file.name;
-    showToast('字幕已加载: ' + file.name);
-  };
-  reader.readAsText(file);
-});
-
-// 检测字幕类型
-function detectSubtitleType(filename) {
-  const ext = filename.split('.').pop().toLowerCase();
-  if (ext === 'ass' || ext === 'ssa') return 'ass';
-  if (ext === 'vtt') return 'vtt';
-  return 'srt';
-}
-
-// 根据字幕格式更新 UI 提示和控件状态
-function updateFormatHint() {
-  const isASS = state.subtitleType === 'ass';
-  const bgOpacityInput = document.getElementById('bgOpacity');
-  const bgOpacityLabel = bgOpacityInput?.closest('.control-group');
-  
-  // bgOpacity 控件：ASS 不支持
-  if (bgOpacityInput) {
-    bgOpacityInput.disabled = isASS;
-    bgOpacityInput.style.opacity = isASS ? '0.4' : '1';
-  }
-  if (bgOpacityLabel) {
-    let hint = bgOpacityLabel.querySelector('.format-hint');
-    if (isASS && !hint) {
-      hint = document.createElement('span');
-      hint.className = 'format-hint';
-      hint.style.cssText = 'font-size:11px; color:#f59e0b; margin-left:4px;';
-      hint.textContent = '⚠️ ASS 不支持';
-      bgOpacityLabel.querySelector('label')?.appendChild(hint);
-    } else if (!isASS && hint) {
-      hint.remove();
-    }
-  }
-  
-  // ASS 整体提示
-  const stylePanel = document.querySelector('.style-panel') || document.querySelector('[class*="style"]');
-  if (stylePanel) {
-    let tip = stylePanel.querySelector('.ass-tip');
-    if (isASS && !tip) {
-      tip = document.createElement('div');
-      tip.className = 'ass-tip';
-      tip.style.cssText = 'background:#1a1a2e; border:1px solid #3b82f6; border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:11px; color:#93c5fd;';
-      tip.innerHTML = '💡 ASS 字幕：仅覆盖您修改的字段，未修改的保留原文件样式';
-      stylePanel.insertBefore(tip, stylePanel.firstChild);
-    } else if (!isASS && tip) {
-      tip.remove();
-    }
-  }
-}
-
-// 解析字幕
-function parseSubtitle() {
-  console.log('[subtitle] === 开始解析字幕 ===');
-  console.log('[subtitle] 类型:', state.subtitleType);
-  console.log('[subtitle] 原始内容长度:', state.subtitleContent?.length || 0);
-  
-  if (!state.subtitleContent) {
-    console.error('[subtitle] 错误: 字幕内容为空');
-    return;
-  }
-  
-  // 检测并处理 BOM（字节顺序标记）
-  let content = state.subtitleContent;
-  
-  // UTF-16 LE BOM: ÿþ (0xFF 0xFE)
-  if (content.charCodeAt(0) === 0xFF && content.charCodeAt(1) === 0xFE) {
-    console.log('[subtitle] 检测到 UTF-16 LE BOM，尝试转换...');
-    content = convertUTF16ToUTF8(content);
-  }
-  // UTF-16 BE BOM: þÿ (0xFE 0xFF)
-  else if (content.charCodeAt(0) === 0xFE && content.charCodeAt(1) === 0xFF) {
-    console.log('[subtitle] 检测到 UTF-16 BE BOM，尝试转换...');
-    content = convertUTF16ToUTF8(content, true);
-  }
-  // UTF-8 BOM: ï»¿ (0xEF 0xBB 0xBF)
-  else if (content.charCodeAt(0) === 0xEF && content.charCodeAt(1) === 0xBB && content.charCodeAt(2) === 0xBF) {
-    console.log('[subtitle] 检测到 UTF-8 BOM，移除...');
-    content = content.substring(1);
-  }
-  
-  // 移除其他不可见控制字符（保留换行和空格）
-  content = content.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
-  
-  state.subtitleContent = content;
-  
-  // 输出前500字符用于调试
-  console.log('[subtitle] 处理后内容预览:', content.substring(0, 500));
-  
-  state.parsedSubtitles = [];
-  
-  if (state.subtitleType === 'srt') {
-    parseSRT();
-  } else if (state.subtitleType === 'vtt') {
-    parseVTT();
-  } else if (state.subtitleType === 'ass') {
-    parseASS();
-  }
-  
-  console.log(`[subtitle] 解析完成: ${state.parsedSubtitles.length} 条字幕`);
-  
-  if (state.parsedSubtitles.length > 0) {
-    console.log('[subtitle] 第一条:', JSON.stringify(state.parsedSubtitles[0]));
-    console.log('[subtitle] 最后一条:', JSON.stringify(state.parsedSubtitles[state.parsedSubtitles.length - 1]));
-  } else {
-    console.warn('[subtitle] 警告: 没有解析到任何字幕!');
-  }
-}
-
-// 转换 UTF-16 到 UTF-8
-function convertUTF16ToUTF8(str, isBigEndian = false) {
-  const result = [];
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i);
-    if (code === 0 && i < 2) continue; // 跳过 BOM
-    if (code < 128) {
-      result.push(String.fromCharCode(code));
-    } else if (code < 2048) {
-      result.push(String.fromCharCode((code >> 6) | 192));
-      result.push(String.fromCharCode((code & 63) | 128));
-    } else {
-      result.push(String.fromCharCode((code >> 12) | 224));
-      result.push(String.fromCharCode(((code >> 6) & 63) | 128));
-      result.push(String.fromCharCode((code & 63) | 128));
-    }
-  }
-  return result.join('');
-}
-
-// 解析 SRT
-function parseSRT() {
-  console.log('[SRT] 开始解析 SRT 格式');
-  const blocks = state.subtitleContent.trim().split(/\n\s*\n/);
-  console.log('[SRT] 文本块数:', blocks.length);
-  
-  let parsedCount = 0;
-  let skippedCount = 0;
-  
-  blocks.forEach((block, blockIndex) => {
-    const lines = block.trim().split('\n');
-    if (lines.length < 3) {
-      skippedCount++;
-      return;
-    }
-    
-    const timeMatch = lines[1].match(/(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/);
-    if (!timeMatch) {
-      skippedCount++;
-      return;
-    }
-    
-    const start = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
-    const end = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
-    const text = lines.slice(2).join('\n').replace(/<[^>]+>/g, '');
-    
-    state.parsedSubtitles.push({ start, end, text });
-    parsedCount++;
-    
-    // 输出前3条字幕用于调试
-    if (parsedCount <= 3) {
-      console.log(`[SRT] 字幕 ${parsedCount}:`, {
-        start: start.toFixed(2),
-        end: end.toFixed(2),
-        text: text.substring(0, 50)
-      });
-    }
-  });
-  
-  console.log(`[SRT] 解析统计: ${parsedCount} 条有效, ${skippedCount} 条跳过`);
-}
-
-// 解析 VTT
-function parseVTT() {
-  console.log('[VTT] 开始解析 VTT 格式');
-  const content = state.subtitleContent.replace(/^WEBVTT\s*\n/, '');
-  const blocks = content.trim().split(/\n\s*\n/);
-  console.log('[VTT] 文本块数:', blocks.length);
-  
-  let parsedCount = 0;
-  let skippedCount = 0;
-  
-  blocks.forEach((block, blockIndex) => {
-    const lines = block.trim().split('\n');
-    let timeLineIndex = lines.findIndex(l => l.includes('-->'));
-    if (timeLineIndex === -1) {
-      skippedCount++;
-      return;
-    }
-    
-    const timeMatch = lines[timeLineIndex].match(/(\d{2}):(\d{2}):(\d{2})[.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[.](\d{3})/);
-    if (!timeMatch) {
-      skippedCount++;
-      return;
-    }
-    
-    const start = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]) + parseInt(timeMatch[4]) / 1000;
-    const end = parseInt(timeMatch[5]) * 3600 + parseInt(timeMatch[6]) * 60 + parseInt(timeMatch[7]) + parseInt(timeMatch[8]) / 1000;
-    const text = lines.slice(timeLineIndex + 1).join('\n').replace(/<[^>]+>/g, '');
-    
-    state.parsedSubtitles.push({ start, end, text });
-    parsedCount++;
-    
-    // 输出前3条字幕用于调试
-    if (parsedCount <= 3) {
-      console.log(`[VTT] 字幕 ${parsedCount}:`, {
-        start: start.toFixed(2),
-        end: end.toFixed(2),
-        text: text.substring(0, 50)
-      });
-    }
-  });
-  
-  console.log(`[VTT] 解析统计: ${parsedCount} 条有效, ${skippedCount} 条跳过`);
-}
-
-// 解析 ASS
-function parseASS() {
-  console.log('[ASS] 开始解析 ASS 格式');
-  const lines = state.subtitleContent.split('\n');
-  console.log('[ASS] 总行数:', lines.length);
-  
-  let inEvents = false;
-  let format = [];
-  let formatFieldCount = 0;
-  let dialogueCount = 0;
-  let skippedCount = 0;
-  let eventSectionFound = false;
-  
-  for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].trim();
-    
-    // 跳过空行和注释
-    if (!line || line.startsWith(';')) continue;
-    
-    // 检测段落（不区分大小写）
-    if (line.startsWith('[')) {
-      const section = line.toLowerCase().replace(/\s/g, '');
-      if (section === '[events]') {
-        inEvents = true;
-        eventSectionFound = true;
-        console.log(`[ASS] 找到 [Events] 段落 (行 ${i})`);
-      } else {
-        if (inEvents) {
-          console.log(`[ASS] 离开 [Events]，进入 ${line} (行 ${i})`);
-        }
-        inEvents = false;
-      }
-      continue;
-    }
-    
-    if (!inEvents) continue;
-    
-    // 解析 Format 行（不区分大小写）
-    if (line.toLowerCase().startsWith('format:')) {
-      format = line.substring(line.indexOf(':') + 1).split(',').map(s => s.trim());
-      formatFieldCount = format.length;
-      console.log('[ASS] Format 字段:', format);
-      continue;
-    }
-    
-    // 解析 Dialogue 行（不区分大小写）
-    if (line.toLowerCase().startsWith('dialogue:')) {
-      dialogueCount++;
-      const dialogueContent = line.substring(line.indexOf(':') + 1).trim();
-      
-      // ASS 格式：Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
-      // Text 字段可以包含逗号，所以需要特殊处理
-      const parts = [];
-      let current = '';
-      let commaCount = 0;
-      
-      for (let j = 0; j < dialogueContent.length; j++) {
-        if (dialogueContent[j] === ',' && commaCount < formatFieldCount - 1) {
-          parts.push(current);
-          current = '';
-          commaCount++;
-        } else {
-          current += dialogueContent[j];
-        }
-      }
-      parts.push(current); // 添加最后一个部分（Text字段）
-      
-      if (format.length === 0) {
-        // 如果没有 Format 行，使用默认 ASS 格式
-        format = ['Layer', 'Start', 'End', 'Style', 'Name', 'MarginL', 'MarginR', 'MarginV', 'Effect', 'Text'];
-        formatFieldCount = format.length;
-      }
-      
-      const startIndex = format.indexOf('Start');
-      const endIndex = format.indexOf('End');
-      const textIndex = format.indexOf('Text');
-      const styleIndex = format.indexOf('Style');
-      
-      if (startIndex === -1 || endIndex === -1 || textIndex === -1) {
-        console.warn(`[ASS] Dialogue ${dialogueCount}: 格式索引无效, format=`, format);
-        skippedCount++;
-        continue;
-      }
-      
-      const start = parseASSTime(parts[startIndex]?.trim());
-      const end = parseASSTime(parts[endIndex]?.trim());
-      
-      // 获取文本
-      let text = parts[textIndex] || '';
-      if (textIndex < parts.length - 1) {
-        text = parts.slice(textIndex).join(',');
-      }
-      text = text.trim();
-      
-      // 处理 ASS 特殊标签
-      text = text.replace(/\{[^}]*\}/g, '');
-      text = text.replace(/\\N/g, '\n');
-      text = text.replace(/\\n/g, '\n');
-      text = text.replace(/\\h/g, ' ');
-      
-      // 获取样式信息
-      const style = styleIndex >= 0 ? parts[styleIndex]?.trim() : 'Default';
-      
-      // 跳过空文本
-      if (!text) {
-        skippedCount++;
-        continue;
-      }
-      
-      // 跳过注释样式
-      if (style.toLowerCase().startsWith('comment')) {
-        skippedCount++;
-        continue;
-      }
-      
-      // 跳过特效字幕（如卡拉OK）
-      if (text.match(/^\{\\[kK]\d+\}/)) {
-        skippedCount++;
-        continue;
-      }
-      
-      state.parsedSubtitles.push({ 
-        start, 
-        end, 
-        text,
-        style 
-      });
-      
-      // 输出前3条字幕用于调试
-      if (state.parsedSubtitles.length <= 3) {
-        console.log(`[ASS] 字幕 ${state.parsedSubtitles.length}:`, {
-          start: start.toFixed(2),
-          end: end.toFixed(2),
-          text: text.substring(0, 50),
-          style: style
-        });
-      }
-    }
-  }
-  
-  if (!eventSectionFound) {
-    console.error('[ASS] 错误: 没有找到 [Events] 段落!');
-    console.log('[ASS] 所有段落标题:');
-    lines.forEach((line, i) => {
-      if (line.trim().startsWith('[')) {
-        console.log(`  行 ${i}: "${line.trim()}"`);
-      }
-    });
-  }
-  
-  console.log(`[ASS] 解析统计: ${dialogueCount} 条 Dialogue, ${state.parsedSubtitles.length} 条有效, ${skippedCount} 条跳过`);
-}
-
-// 解析 ASS 时间
-// ASS 时间格式: H:MM:SS.CC (centiseconds, 1/100秒)
-// 也支持: HH:MM:SS.CCC (milliseconds)
-function parseASSTime(timeStr) {
-  if (!timeStr) return 0;
-  
-  // 标准 ASS 格式: H:MM:SS.CC 或 HH:MM:SS.CC
-  const match1 = timeStr.match(/(\d+):(\d{2}):(\d{2})[.](\d{2})/);
-  if (match1) {
-    const hours = parseInt(match1[1]);
-    const minutes = parseInt(match1[2]);
-    const seconds = parseInt(match1[3]);
-    const centiseconds = parseInt(match1[4]);
-    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
-  }
-  
-  // 毫秒格式: H:MM:SS.CCC 或 HH:MM:SS.CCC
-  const match2 = timeStr.match(/(\d+):(\d{2}):(\d{2})[.](\d{3})/);
-  if (match2) {
-    const hours = parseInt(match2[1]);
-    const minutes = parseInt(match2[2]);
-    const seconds = parseInt(match2[3]);
-    const milliseconds = parseInt(match2[4]);
-    return hours * 3600 + minutes * 60 + seconds + milliseconds / 1000;
-  }
-  
-  // 逗号分隔格式: H:MM:SS,CC
-  const match3 = timeStr.match(/(\d+):(\d{2}):(\d{2})[,](\d{2})/);
-  if (match3) {
-    const hours = parseInt(match3[1]);
-    const minutes = parseInt(match3[2]);
-    const seconds = parseInt(match3[3]);
-    const centiseconds = parseInt(match3[4]);
-    return hours * 3600 + minutes * 60 + seconds + centiseconds / 100;
-  }
-  
-  return 0;
-}
-
-// ===== JASSUB 字幕渲染 =====
-
-// 初始化 JASSUB 渲染器
-function initJASSUB(subtitleContent, subtitleType) {
-  // 销毁旧渲染器
-  if (state.jassubRenderer) {
-    try { state.jassubRenderer.destroy(); } catch(e) {}
-    state.jassubRenderer = null;
-  }
-  
-  // 检查 JASSUB 是否可用
-  if (typeof JASSUB === 'undefined') {
-    console.warn('[JASSUB] 库未加载，回退到 JS 渲染');
-    // 显示加载失败提示
-    const modeEl = document.getElementById('renderMode');
-    if (modeEl) {
-      modeEl.textContent = '⚠️ JASSUB 加载失败，使用 JS 渲染';
-      modeEl.style.color = '#ef4444';
-    }
-    updateRenderModeHint('fallback');
-    return false;
-  }
-  
-  // 判断是否需要应用用户样式覆盖
-  // ASS/SSA 文件：保留原始样式（特效依赖原始样式参数）
-  // SRT/VTT 文件：需要应用用户样式（因为转换后的 ASS 使用默认样式）
-  const needOverrideStyle = (subtitleType === 'srt' || subtitleType === 'vtt');
-  
-  // SRT/VTT 需要转换为 ASS 格式
-  let assContent = subtitleContent;
-  if (needOverrideStyle) {
-    assContent = convertToASS(subtitleContent, subtitleType);
-  }
-  
-  try {
-    state.jassubRenderer = new JASSUB({
-      video: video,
-      content: assContent,
-      subCharset: 'UTF-8',
-      fallbackFont: 'sans-serif',
-      // 使用本地文件路径
-      workerUrl: '/static/js/jassub-worker.js',
-      wasmUrl: '/static/js/jassub-worker.wasm',
-      // 禁用 JASSUB 的默认字体加载，使用页面已有的字体
-      availableFonts: {},
-    });
-    
-    // 只有 SRT/VTT 转换的才应用用户样式覆盖
-    // ASS 文件保留原始样式，否则特效会失效
-    if (needOverrideStyle) {
-      updateJASSUBStyle();
-    } else {
-      console.log('[JASSUB] ASS 文件，保留原始样式');
-      // 隐藏样式控制面板的提示
-      updateRenderModeHint('original');
-    }
-    
-    // 隐藏 JS 渲染的 overlay（JASSUB 有自己的 canvas）
-    overlay.style.display = 'none';
-    
-    // 更新渲染模式指示器
-    const modeEl = document.getElementById('renderMode');
-    if (modeEl) modeEl.textContent = needOverrideStyle ? '🎬 JASSUB 渲染 (自定义样式)' : '🎬 JASSUB 渲染 (原始样式)';
-    
-    // 记录当前模式
-    state.jassubStyleMode = needOverrideStyle ? 'custom' : 'original';
-    
-    console.log('[JASSUB] 渲染器初始化成功');
-    return true;
-  } catch(e) {
-    console.error('[JASSUB] 初始化失败:', e);
-    state.jassubRenderer = null;
-    return false;
-  }
-}
-
-// 更新渲染模式提示
-function updateRenderModeHint(mode) {
-  const hintEl = document.getElementById('renderModeHint');
-  if (!hintEl) return;
-  
-  if (mode === 'original') {
-    hintEl.textContent = 'ASS 文件：页面样式控件不影响预览，使用原始字幕样式';
-    hintEl.style.color = '#f59e0b';
-  } else if (mode === 'fallback') {
-    hintEl.textContent = 'JASSUB 未加载，ASS 特效无法显示，请检查网络或浏览器兼容性';
-    hintEl.style.color = '#ef4444';
-  } else {
-    hintEl.textContent = 'SRT/VTT 文件：页面样式控件可实时调整预览效果';
-    hintEl.style.color = '#10b981';
-  }
-  hintEl.style.display = 'block';
-}
-
-// 更新 JASSUB 样式（参数变化时调用）
-function updateJASSUBStyle() {
-  if (!state.jassubRenderer) return;
-  
-  const p = state.params;
-  
-  // 颜色转换: #RRGGBB → &H00BBGGRR (ASS 格式)
-  const fontColor = hexToASSColor(p.fontColor);
-  const outlineColor = hexToASSColor(p.outlineColor);
-  
-  // 位置映射: ASS alignment (numpad布局)
-  // 2=底部居中, 8=顶部居中, 5=中间居中
-  let alignment = 2;
-  if (p.positionY === 'top') alignment = 8;
-  else if (p.positionY === 'center') alignment = 5;
-  
-  // 边距
-  const marginV = p.positionY === 'bottom' ? p.marginBottom : p.marginTop;
-  
-  try {
-    state.jassubRenderer.setOverrideStyle({
-      FontName: p.fontFamily,
-      FontSize: p.fontSize,
-      PrimaryColour: fontColor,
-      Bold: p.fontWeight === 'bold' ? -1 : 0,
-      Outline: p.outlineWidth,
-      Shadow: p.shadowOffset,
-      MarginV: marginV,
-      Alignment: alignment,
-      OutlineColour: outlineColor,
-    });
-  } catch(e) {
-    console.warn('[JASSUB] 更新样式失败:', e);
-  }
-}
-
-// 颜色转换: #RRGGBB → &H00BBGGRR
-function hexToASSColor(hex) {
-  if (!hex || hex.length < 7) return '&H00FFFFFF';
-  const r = hex.substring(1, 3);
-  const g = hex.substring(3, 5);
-  const b = hex.substring(5, 7);
-  return `&H00${b}${g}${r}`.toUpperCase();
-}
-
-// 将 SRT/VTT 转换为 ASS 格式
-function convertToASS(content, type) {
-  let ass = `[Script Info]
-Title: Converted from ${type.toUpperCase()}
-ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
-WrapStyle: 0
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Noto Sans CJK SC,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,20,20,30,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`;
-  
-  // 解析 SRT/VTT 并转换为 ASS Dialogue
-  const blocks = content.trim().split(/\n\s*\n/);
-  blocks.forEach(block => {
-    const lines = block.trim().split('\n');
-    let timeLineIdx = lines.findIndex(l => l.includes('-->'));
-    if (timeLineIdx === -1) return;
-    
-    const timeMatch = lines[timeLineIdx].match(
-      /(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/
-    );
-    if (!timeMatch) return;
-    
-    const startH = parseInt(timeMatch[1]);
-    const startM = parseInt(timeMatch[2]);
-    const startS = parseInt(timeMatch[3]);
-    const startMs = parseInt(timeMatch[4]);
-    const endH = parseInt(timeMatch[5]);
-    const endM = parseInt(timeMatch[6]);
-    const endS = parseInt(timeMatch[7]);
-    const endMs = parseInt(timeMatch[8]);
-    
-    const startASS = `${startH}:${String(startM).padStart(2,'0')}:${String(startS).padStart(2,'0')}.${String(Math.floor(startMs/10)).padStart(2,'0')}`;
-    const endASS = `${endH}:${String(endM).padStart(2,'0')}:${String(endS).padStart(2,'0')}.${String(Math.floor(endMs/10)).padStart(2,'0')}`;
-    
-    const text = lines.slice(timeLineIdx + 1).join('\\N').replace(/<[^>]+>/g, '');
-    if (text.trim()) {
-      ass += `Dialogue: 0,${startASS},${endASS},Default,,0,0,0,,${text}\n`;
-    }
-  });
-  
-  return ass;
-}
-
-// 更新字幕显示（JASSUB 模式）
-function updateSubtitleDisplay() {
-  // 精确预览模式下跳过
-  if (_precisePreviewActive) return;
-  
-  // 如果有 JASSUB 渲染器，只需同步时间
-  if (state.jassubRenderer) {
-    const adjustedTime = video.currentTime + state.params.timeOffset;
-    try {
-      state.jassubRenderer.setCurrentTime(adjustedTime);
-    } catch(e) {}
-    return;
-  }
-  
-  // 回退: JS 渲染模式（显示 overlay）
-  overlay.style.display = '';
-  
-  const currentTime = video.currentTime + state.params.timeOffset;
-  
-  let foundIndex = -1;
-  for (let i = 0; i < state.parsedSubtitles.length; i++) {
-    const sub = state.parsedSubtitles[i];
-    if (currentTime >= sub.start && currentTime <= sub.end) {
-      foundIndex = i;
-      break;
-    }
-  }
-  
-  if (foundIndex === state.currentSubtitleIndex) return;
-  state.currentSubtitleIndex = foundIndex;
-  
-  overlay.innerHTML = '';
-  
-  if (foundIndex === -1) return;
-  
-  const sub = state.parsedSubtitles[foundIndex];
-  const lines = sub.text.split('\n');
-  
-  lines.forEach((line, index) => {
-    const div = document.createElement('div');
-    div.className = 'subtitle-line';
-    div.textContent = line;
-    applySubtitleStyle(div, index, lines.length);
-    overlay.appendChild(div);
-  });
-}
-
-// 获取视频显示区域的缩放信息
-function getVideoDisplayInfo() {
-  if (!video.videoWidth || !video.videoHeight) return null;
-  const wrapper = document.querySelector('.video-wrapper');
-  const ww = wrapper.clientWidth, wh = wrapper.clientHeight;
-  const vw = video.videoWidth, vh = video.videoHeight;
-  const containerRatio = ww / wh;
-  const videoRatio = vw / vh;
-  let displayW, displayH, offsetX, offsetY;
-  if (videoRatio > containerRatio) {
-    displayW = ww; displayH = ww / videoRatio;
-    offsetX = 0; offsetY = (wh - displayH) / 2;
-  } else {
-    displayH = wh; displayW = wh * videoRatio;
-    offsetX = (ww - displayW) / 2; offsetY = 0;
-  }
-  return { displayW, displayH, offsetX, offsetY, vw, vh };
-}
-
-// 应用字幕样式（基于视频原始分辨率缩放）
-function applySubtitleStyle(element, lineIndex, totalLines) {
-  const p = state.params;
-  
-  // 计算缩放比例：容器显示尺寸 / 视频原始尺寸
-  const info = getVideoDisplayInfo();
-  const fontScale = info ? info.displayW / info.vw : 1;
-  const posScale = info ? info.displayH / info.vh : 1;
-  
-  // 缩放后的像素值
-  const fontSize = p.fontSize * fontScale;
-  const marginBottom = p.marginBottom * posScale;
-  const marginTop = p.marginTop * posScale;
-  const outlineWidth = p.outlineWidth * fontScale;
-  const shadowOffset = p.shadowOffset * fontScale;
-  
-  element.style.fontSize = fontSize + 'px';
-  element.style.fontFamily = p.fontFamily;
-  element.style.color = p.fontColor;
-  element.style.fontWeight = p.fontWeight;
-  
-  if (p.outlineWidth > 0) {
-    const oc = p.outlineColor;
-    const ow = outlineWidth;
-    element.style.textShadow = `
-      ${oc} ${ow}px 0,
-      ${oc} -${ow}px 0,
-      ${oc} 0 ${ow}px,
-      ${oc} 0 -${ow}px
-    `;
-  }
-  
-  if (p.shadowOffset > 0) {
-    const so = shadowOffset;
-    element.style.textShadow += `, ${so}px ${so}px ${so * 2}px rgba(0,0,0,0.8)`;
-  }
-  
-  if (p.bgOpacity > 0) {
-    const opacity = p.bgOpacity / 100;
-    element.style.backgroundColor = `rgba(0, 0, 0, ${opacity})`;
-    element.style.padding = `${4 * fontScale}px ${12 * fontScale}px`;
-    element.style.borderRadius = '4px';
-  }
-  
-  const lineHeight = fontSize * 1.4;
-  const totalHeight = lineHeight * totalLines;
-  
-  // 定位相对于视频区域（考虑黑边偏移）
-  const offsetTop = info ? info.offsetY : 0;
-  
-  if (p.positionY === 'bottom') {
-    const bottomFromVideo = marginBottom + (totalLines - 1 - lineIndex) * lineHeight;
-    element.style.top = (offsetTop + info.displayH - bottomFromVideo - fontSize) + 'px';
-    element.style.bottom = 'auto';
-  } else if (p.positionY === 'top') {
-    const topFromVideo = marginTop + lineIndex * lineHeight;
-    element.style.top = (offsetTop + topFromVideo) + 'px';
-    element.style.bottom = 'auto';
-  } else {
-    const centerOffset = (info.displayH - totalHeight) / 2;
-    element.style.top = (offsetTop + centerOffset + lineIndex * lineHeight) + 'px';
-    element.style.bottom = 'auto';
-  }
-}
-
-// 媒体浏览器
-function openMediaBrowser(mode) {
-  mediaBrowserMode = mode;
-  mediaBrowserPath = '';
-  mediaBrowserSelected = null;
-  
-  document.getElementById('modalTitle').textContent = mode === 'video' ? '📁 选择视频文件' : '📁 选择字幕文件';
-  document.getElementById('selectionInfo').textContent = mode === 'video' ? '请选择视频文件' : '请选择字幕文件';
-  document.getElementById('confirmBtn').disabled = true;
-  document.getElementById('mediaModal').classList.add('active');
-  
-  loadMediaContent('');
-}
-
-function closeMediaBrowser() {
-  document.getElementById('mediaModal').classList.remove('active');
-}
-
-async function loadMediaContent(path) {
-  mediaBrowserPath = path;
-  document.getElementById('modalBreadcrumb').textContent = '📁 /' + (path || '');
-  document.getElementById('modalList').innerHTML = '<div style="text-align:center; color:#666; padding:40px;">加载中...</div>';
-  
-  try {
-    const response = await fetch('/api/media/list?path=' + encodeURIComponent(path));
-    if (!response.ok) throw new Error('加载失败');
-    
-    const data = await response.json();
-    const list = document.getElementById('modalList');
-    list.innerHTML = '';
-    
-    // 返回上级
-    if (path) {
-      const parentPath = path.split('/').slice(0, -1).join('/');
-      const backItem = createMediaItem('📁', '.. 返回上级', '', true);
-      backItem.onclick = () => loadMediaContent(parentPath);
-      list.appendChild(backItem);
-    }
-    
-    // 文件列表
-    data.items.forEach(item => {
-      const ext = item.ext || '';
-      const isVideo = ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v'].includes(ext);
-      const isSubtitle = ['.srt', '.vtt', '.ass', '.ssa', '.sub'].includes(ext);
-      
-      if (!item.is_dir) {
-        if (mediaBrowserMode === 'video' && !isVideo) return;
-        if (mediaBrowserMode === 'subtitle' && !isSubtitle) return;
-      }
-      
-      let icon = '📄';
-      if (item.is_dir) icon = '📁';
-      else if (isVideo) icon = '🎬';
-      else if (isSubtitle) icon = '💬';
-      
-      const itemEl = createMediaItem(icon, item.name, item.is_dir ? '' : formatSize(item.size), false);
-      
-      if (item.is_dir) {
-        itemEl.onclick = () => loadMediaContent(item.path);
-      } else {
-        itemEl.onclick = () => {
-          mediaBrowserSelected = item.path;
-          document.getElementById('confirmBtn').disabled = false;
-          document.getElementById('selectionInfo').textContent = '已选择: ' + item.name;
-          
-          list.querySelectorAll('.media-item').forEach(el => el.classList.remove('selected'));
-          itemEl.classList.add('selected');
-        };
-      }
-      
-      list.appendChild(itemEl);
-    });
-    
-    if (list.children.length === 0) {
-      list.innerHTML = '<div style="text-align:center; color:#666; padding:40px;">没有找到匹配的文件</div>';
-    }
-  } catch (error) {
-    document.getElementById('modalList').innerHTML = '<div style="text-align:center; color:#ef4444; padding:40px;">加载失败: ' + error.message + '</div>';
-  }
-}
-
-function createMediaItem(icon, name, size, isBack) {
-  const div = document.createElement('div');
-  div.className = 'media-item';
-  div.innerHTML = `
-    <span class="icon">${icon}</span>
-    <span class="name">${name}</span>
-    <span class="size">${size}</span>
-  `;
-  return div;
-}
-
-async function confirmSelection() {
-  if (!mediaBrowserSelected) return;
-  
-  const fileName = mediaBrowserSelected.split('/').pop();
-  const selectedPath = mediaBrowserSelected; // 保存路径
-  
-  // 先关闭弹窗
-  closeMediaBrowser();
-  
-  if (mediaBrowserMode === 'video') {
-    // 获取视频信息
-    try {
-      const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath));
-      if (probeResponse.ok) {
-        const probeData = await probeResponse.json();
-        if (probeData.format && probeData.format.duration) {
-          state.videoDuration = parseFloat(probeData.format.duration);
-        }
-        // 检查音频是否需要转码
-        if (probeData.audio_codec && !['aac', 'mp3', 'opus', 'vorbis'].includes(probeData.audio_codec)) {
-          state.needAudioTranscode = true;
-        } else {
-          state.needAudioTranscode = false;
-        }
-      }
-    } catch (e) {
-      // 忽略探测失败
-    }
-    
-    // 立即播放视频（原文件，可能静音）
-    state.videoPath = selectedPath;
-    state.currentSegmentStart = 0;
-    
-    // 使用原文件直接播放（浏览器会尝试播放，可能只有画面）
-    const videoUrl = '/api/media/stream?path=' + encodeURIComponent(selectedPath);
-    video.src = videoUrl;
-    document.getElementById('videoName').textContent = fileName;
-    showToast('视频已加载: ' + fileName);
-    
-    // 探测视频信息（包括内嵌字幕）
-    try {
-      const probeResponse = await fetch('/api/media/probe?path=' + encodeURIComponent(selectedPath));
-      if (probeResponse.ok) {
-        const probeData = await probeResponse.json();
-        
-        // 检查是否有内嵌字幕
-        if (probeData.subtitle_streams && probeData.subtitle_streams.length > 0) {
-          const section = document.getElementById('embeddedSubSection');
-          const select = document.getElementById('embeddedSubSelect');
-          const info = document.getElementById('embeddedSubInfo');
-          
-          select.innerHTML = '<option value="">-- 加载内嵌字幕 --</option>';
-          probeData.subtitle_streams.forEach((stream, arrayIndex) => {
-            const label = stream.title || `字幕轨道 ${stream.index}`;
-            const lang = stream.language ? ` (${stream.language})` : '';
-            select.innerHTML += `<option value="${arrayIndex}">${label}${lang} [${stream.codec}]</option>`;
-          });
-          
-          section.style.display = 'block';
-          info.textContent = `检测到 ${probeData.subtitle_streams.length} 个内嵌字幕轨道`;
-        } else {
-          document.getElementById('embeddedSubSection').style.display = 'none';
-        }
-      }
-    } catch (e) {
-      console.error('探测视频信息失败:', e);
-    }
-    
-    // 如果需要转码音频，后台异步加载
-    if (state.needAudioTranscode) {
-      // 初始化 MediaSource
-      initMediaSourceAudio();
-      loadAudioForSegment(selectedPath, 0);
-    }
-    
-  } else {
-    console.log('[load] 加载字幕文件:', selectedPath);
-    try {
-      const response = await fetch('/api/media/file?path=' + encodeURIComponent(selectedPath));
-      console.log('[load] 字幕 API 响应:', response.status);
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[load] API 错误:', errorText);
-        throw new Error('获取失败');
-      }
-      
-      const data = await response.json();
-      console.log('[load] 字幕数据:', {
-        filename: data.filename,
-        type: data.type,
-        contentLength: data.content?.length || 0
-      });
-      
-      state.subtitleContent = data.content;
-      state.subtitlePath = selectedPath;
-      state.subtitleType = detectSubtitleType(fileName);
-      console.log('[load] 检测字幕类型:', state.subtitleType);
-      
-      parseSubtitle();
-      updateFormatHint();
-      
-      // 初始化 JASSUB 渲染器
-      initJASSUB(state.subtitleContent, state.subtitleType);
-      
-      document.getElementById('subName').textContent = fileName;
-      showToast('字幕已加载: ' + fileName);
-    } catch (error) {
-      console.error('[load] 加载字幕失败:', error);
-      showToast('加载字幕失败: ' + error.message, 'error');
-    }
-  }
-}
-
-// 异步加载音频
-let audioLoading = false; // 加载锁，防止并发加载
-
-// 加载内嵌字幕
-async function loadEmbeddedSubtitle() {
-  const select = document.getElementById('embeddedSubSelect');
-  const subtitleIndex = select.value;
-  
-  if (!subtitleIndex || !state.videoPath) return;
-  
-  const info = document.getElementById('embeddedSubInfo');
-  info.textContent = '正在提取字幕...';
-  
-  try {
-    const url = `/api/media/extract-subtitle?path=${encodeURIComponent(state.videoPath)}&subtitle_index=${parseInt(subtitleIndex)}`;
-    const response = await fetch(url);
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || '提取失败');
-    }
-    
-    const data = await response.json();
-    
-    // 加载字幕内容
-    state.subtitleContent = data.content;
-    state.subtitlePath = data.filename;
-    state.subtitleType = data.type === '.ass' ? 'ass' : (data.type === '.vtt' ? 'vtt' : 'srt');
-    
-    // 解析字幕
-    parseSubtitle();
-    updateFormatHint();
-    
-    // 初始化 JASSUB 渲染器
-    initJASSUB(state.subtitleContent, state.subtitleType);
-    
-    // 更新 UI
-    document.getElementById('subName').textContent = data.filename;
-    info.textContent = `✓ 已加载: ${data.title} [${data.codec}]`;
-    
-    showToast(`已加载内嵌字幕: ${data.title}`);
-    
-  } catch (error) {
-    console.error('加载内嵌字幕失败:', error);
-    info.textContent = `✗ 加载失败: ${error.message}`;
-    showToast('加载内嵌字幕失败', 'error');
-  }
-}
-
-// 加载内嵌字幕的异步函数
-
-// 删除内嵌字幕功能
-function showRemoveSubtitlesModal() {
-  if (!state.videoPath) {
-    showToast('请先加载视频', 'error');
-    return;
-  }
-  
-  // 重置为"删除所有"模式
-  document.querySelector('input[name="removeMode"][value="all"]').checked = true;
-  document.getElementById('removeSubtitlesList').style.display = 'none';
-  
-  // 探测字幕轨道
-  fetch(`/api/media/probe?path=${encodeURIComponent(state.videoPath)}`)
-    .then(response => response.json())
-    .then(data => {
-      if (data.subtitle_streams && data.subtitle_streams.length > 0) {
-        renderRemoveSubtitlesList(data.subtitle_streams);
-        document.getElementById('removeSubtitlesModal').classList.add('active');
-      } else {
-        showToast('视频中没有内嵌字幕', 'error');
-      }
-    })
-    .catch(error => {
-      console.error('探测字幕失败:', error);
-      showToast('探测字幕失败', 'error');
-    });
-}
-
-function closeRemoveSubtitlesModal() {
-  document.getElementById('removeSubtitlesModal').classList.remove('active');
-}
-
-// 切换删除模式
-function toggleRemoveMode() {
-  const mode = document.querySelector('input[name="removeMode"]:checked').value;
-  document.getElementById('removeSubtitlesList').style.display = mode === 'select' ? 'block' : 'none';
-}
-
-function renderRemoveSubtitlesList(subtitleStreams) {
-  const list = document.getElementById('removeSubtitlesList');
-  // 按语言分组统计
-  const langMap = {};
-  subtitleStreams.forEach(s => {
-    const lang = s.language || '未知语言';
-    if (!langMap[lang]) langMap[lang] = [];
-    langMap[lang].push(s);
-  });
-  
-  list.innerHTML = subtitleStreams.map(stream => {
-    const label = stream.title || `字幕轨道 ${stream.index}`;
-    const lang = stream.language || '未知';
-    const langColors = {
-      'chi': '#10b981', 'zho': '#10b981', 'chs': '#10b981', 'cht': '#10b981',
-      'eng': '#3b82f6', 'jpn': '#f59e0b', 'kor': '#8b5cf6',
-      'fre': '#ef4444', 'ger': '#6366f1', 'spa': '#ec4899'
-    };
-    const color = langColors[lang.toLowerCase()] || '#64748b';
-    return `
-      <div style="display:flex; align-items:center; padding:10px; background:#1a1a2e; border:1px solid #333; border-radius:8px; margin-bottom:6px;">
-        <input type="checkbox" id="sub_${stream.index}" value="${stream.index}" style="width:16px; height:16px; margin-right:10px;">
-        <div style="flex:1;">
-          <div style="font-size:13px; color:#e5e5e5;">
-            ${label}
-            <span style="display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; margin-left:6px; background:${color}22; color:${color}; border:1px solid ${color}44;">${lang}</span>
-          </div>
-          <div style="font-size:11px; color:#666;">索引: ${stream.index} | 编码: ${stream.codec}</div>
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-async function executeRemoveSubtitles() {
-  const mode = document.querySelector('input[name="removeMode"]:checked').value;
-  let keepIndices = [];
-  let removeCount = 0;
-  let removeLabel = '';
-  
-  if (mode === 'all') {
-    // 删除所有字幕
-    keepIndices = [];
-    removeCount = -1; // -1 表示删除所有
-    removeLabel = '全部字幕';
-  } else {
-    // 按选择保留
-    const checkboxes = document.querySelectorAll('#removeSubtitlesList input[type="checkbox"]');
-    checkboxes.forEach(cb => {
-      if (cb.checked) {
-        keepIndices.push(cb.value);
-      }
-    });
-    
-    if (keepIndices.length === checkboxes.length) {
-      showToast('请至少选择一个要删除的轨道', 'error');
-      return;
-    }
-    removeCount = checkboxes.length - keepIndices.length;
-    removeLabel = `${removeCount} 个轨道`;
-  }
-  
-  // 保存删除配置到 state（压制时使用）
-  state.removeSubtitleIndices = keepIndices.join(',');
-  state.removeSubtitleCount = removeCount;
-  state.removeSubtitleMode = mode;
-  
-  // 保存到 localStorage 以便持久化
-  localStorage.setItem('removeSubtitleIndices', state.removeSubtitleIndices);
-  localStorage.setItem('removeSubtitleCount', String(removeCount));
-  localStorage.setItem('removeSubtitleMode', mode);
-  
-  showToast(`已标记删除 ${removeLabel}，将在压制时生效`, 'success');
-  closeRemoveSubtitlesModal();
-  
-  // 保存字幕语言设置到 localStorage（供预设使用）
-  const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
-  const subKeepLanguages = document.getElementById('subKeepLanguages')?.value?.trim() || '';
-  
-  if (mode === 'select' && subKeepLanguages) {
-    state.removeSubtitleMode = 'language';
-    localStorage.setItem('removeSubtitleMode', 'language');
-    localStorage.setItem('subKeepMode', subKeepMode);
-    localStorage.setItem('subKeepLanguages', subKeepLanguages);
-  } else {
-    state.removeSubtitleMode = 'all';
-    localStorage.setItem('removeSubtitleMode', 'all');
-    localStorage.removeItem('subKeepMode');
-    localStorage.removeItem('subKeepLanguages');
-  }
-  
-  // 更新状态显示
-  updateSubDeleteStatus();
-}
-
-// 删除全部内嵌字幕
-function markDeleteAllSubtitles() {
-  state.removeSubtitleMode = 'all';
-  state.removeSubtitleCount = -1;
-  localStorage.setItem('removeSubtitleMode', 'all');
-  localStorage.setItem('removeSubtitleCount', '-1');
-  localStorage.removeItem('removeSubtitleIndices');
-  localStorage.removeItem('subKeepMode');
-  localStorage.removeItem('subKeepLanguages');
-  updateSubDeleteStatus();
-  showToast('已标记删除全部字幕，压制时生效', 'success');
-}
-
-// 更新删除状态显示
-function updateSubDeleteStatus() {
-  const statusDiv = document.getElementById('subDeleteStatus');
-  const statusText = document.getElementById('subDeleteStatusText');
-  const mode = localStorage.getItem('removeSubtitleMode') || '';
-  const langs = localStorage.getItem('subKeepLanguages') || '';
-  const subKeepMode = localStorage.getItem('subKeepMode') || '';
-
-  if (mode === 'all') {
-    statusDiv.style.display = 'block';
-    statusText.textContent = '🗑️ 已标记删除全部内嵌字幕';
-    document.getElementById('deleteAllSubBtn').style.borderColor = '#f59e0b';
-    document.getElementById('deleteAllSubBtn').style.color = '#f59e0b';
-    document.getElementById('deleteByLangBtn').style.borderColor = '';
-    document.getElementById('deleteByLangBtn').style.color = '';
-  } else if (mode === 'language' && langs) {
-    const modeLabel = subKeepMode === 'delete_selected' ? '删除指定语言' : '保留指定语言';
-    statusDiv.style.display = 'block';
-    statusText.textContent = `🌐 已标记：${modeLabel} (${langs})`;
-    document.getElementById('deleteByLangBtn').style.borderColor = '#f59e0b';
-    document.getElementById('deleteByLangBtn').style.color = '#f59e0b';
-    document.getElementById('deleteAllSubBtn').style.borderColor = '';
-    document.getElementById('deleteAllSubBtn').style.color = '';
-  } else {
-    statusDiv.style.display = 'none';
-    document.getElementById('deleteAllSubBtn').style.borderColor = '';
-    document.getElementById('deleteAllSubBtn').style.color = '';
-    document.getElementById('deleteByLangBtn').style.borderColor = '';
-    document.getElementById('deleteByLangBtn').style.color = '';
-  }
-}
-
-// 取消删除字幕标记
-function clearRemoveSubtitles() {
-  state.removeSubtitleIndices = '';
-  state.removeSubtitleCount = 0;
-  localStorage.removeItem('removeSubtitleIndices');
-  localStorage.removeItem('removeSubtitleCount');
-  localStorage.removeItem('removeSubtitleMode');
-  localStorage.removeItem('subKeepMode');
-  localStorage.removeItem('subKeepLanguages');
-  updateSubDeleteStatus();
-  showToast('已取消删除字幕标记', 'success');
-}
-
-// 初始化 MediaSource 音频播放
-function initMediaSourceAudio() {
-  if (state.mediaSource) return; // 已初始化
-  
-  // 检查浏览器是否支持 MediaSource
-  if (!window.MediaSource) {
-    console.warn('[audio] MediaSource not supported, falling back to legacy mode');
-    return false;
-  }
-  
-  state.mediaSource = new MediaSource();
-  state.audioElement = new Audio();
-  state.audioElement.src = URL.createObjectURL(state.mediaSource);
-  
-  state.mediaSource.addEventListener('sourceopen', () => {
-    console.log('[audio] MediaSource opened');
-    // 创建 SourceBuffer，使用 AAC 编码
-    try {
-      state.sourceBuffer = state.mediaSource.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"');
-      state.sourceBuffer.addEventListener('updateend', () => {
-        console.log('[audio] SourceBuffer update ended');
-        audioLoading = false;
-      });
-    } catch (e) {
-      console.error('[audio] Failed to create SourceBuffer:', e);
-    }
-  });
-  
-  // 初始化视频同步事件
-  initAudioSyncEvents();
-  return true;
-}
-
-// 初始化音频同步事件
-function initAudioSyncEvents() {
-  if (state.audioInitialized) return;
-  state.audioInitialized = true;
-  
-  // 同步视频和音频的播放状态
-  video.addEventListener('play', () => {
-    if (state.audioElement) {
-      state.audioElement.play().catch(() => {});
-    }
-  });
-  
-  video.addEventListener('pause', () => {
-    if (state.audioElement) {
-      state.audioElement.pause();
-    }
-  });
-  
-  // 定期同步音频和视频（每 500ms 检查一次，防止漂移）
-  setInterval(() => {
-    if (!state.audioElement || !state.needAudioTranscode) return;
-    if (video.paused || state.audioElement.paused) return;
-    
-    const expectedAudioTime = video.currentTime - (state.currentSegmentStart || 0);
-    const actualAudioTime = state.audioElement.currentTime;
-    const drift = Math.abs(expectedAudioTime - actualAudioTime);
-    
-    // 如果漂移超过 0.3 秒，强制同步
-    if (drift > 0.3 && expectedAudioTime >= 0) {
-      console.log(`[audio sync] drift=${drift.toFixed(2)}s, correcting...`);
-      state.audioElement.currentTime = expectedAudioTime;
-    }
-  }, 500);
-}
-
-// 加载音频片段到 MediaSource
-async function loadAudioSegmentToMSE(path, startTime) {
-  if (!state.sourceBuffer || state.sourceBuffer.updating) {
-    console.log('[audio] SourceBuffer not ready or updating');
-    return false;
-  }
-  
-  const segmentDuration = state.segmentDuration || 20;
-  
-  try {
-    const audioUrl = `/api/media/audio-transcode?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
-    const response = await fetch(audioUrl);
-    
-    if (response.status === 204) {
-      // 音频已经是浏览器支持的格式，不需要转码
-      return false;
-    }
-    
-    if (!response.ok) throw new Error('音频转码失败');
-    
-    const audioBlob = await response.blob();
-    const arrayBuffer = await audioBlob.arrayBuffer();
-    
-    // 追加到 SourceBuffer
-    state.sourceBuffer.appendBuffer(arrayBuffer);
-    state.currentSegmentStart = startTime;
-    
-    console.log(`[audio] Appended segment from ${startTime}s`);
-    return true;
-    
-  } catch (error) {
-    console.error('[audio] Failed to load segment:', error);
-    return false;
-  }
-}
-
-// 加载音频片段（用于首次加载和拖动）
-async function loadAudioForSegment(path, startTime) {
-  if (audioLoading) return;
-  audioLoading = true;
-  
-  const statusEl = document.getElementById('audioStatus');
-  if (statusEl) {
-    statusEl.textContent = '🔊 音频加载中...';
-    statusEl.style.display = 'block';
-  }
-  
-  // 使用 MediaSource 模式
-  if (state.mediaSource && state.sourceBuffer) {
-    try {
-      const success = await loadAudioSegmentToMSE(path, startTime);
-      if (success) {
-        // 同步播放位置
-        const videoCurrentTime = video.currentTime;
-        const audioOffset = videoCurrentTime - startTime;
-        if (audioOffset >= 0 && audioOffset <= (state.segmentDuration || 20)) {
-          state.audioElement.currentTime = audioOffset;
-        }
-        
-        // 如果视频正在播放，同步播放音频
-        if (!video.paused) {
-          state.audioElement.play().catch(() => {});
-        }
-        
-        if (statusEl) {
-          statusEl.textContent = '🔊 音频已就绪';
-          setTimeout(() => statusEl.style.display = 'none', 2000);
-        }
-      }
-    } catch (error) {
-      console.error('[audio] MSE load failed:', error);
-    } finally {
-      audioLoading = false;
-    }
-    return;
-  }
-  
-  // 回退到传统模式（如果 MediaSource 不可用）
-  loadAudioForSegmentLegacy(path, startTime);
-}
-
-// 传统模式加载音频（回退方案）
-async function loadAudioForSegmentLegacy(path, startTime) {
-  const segmentDuration = state.segmentDuration || 20;
-  
-  try {
-    const audioUrl = `/api/media/audio-transcode?path=${encodeURIComponent(path)}&start=${startTime}&duration=${segmentDuration}`;
-    const response = await fetch(audioUrl);
-    
-    if (response.status === 204) {
-      audioLoading = false;
-      return;
-    }
-    
-    if (!response.ok) throw new Error('音频转码失败');
-    
-    const audioBlob = await response.blob();
-    const audioObjUrl = URL.createObjectURL(audioBlob);
-    
-    // 创建新的音频元素
-    const newAudio = new Audio();
-    newAudio.src = audioObjUrl;
-    
-    // 计算音频偏移
-    const videoCurrentTime = video.currentTime;
-    const audioOffset = videoCurrentTime - startTime;
-    
-    if (audioOffset >= 0 && audioOffset <= segmentDuration) {
-      newAudio.currentTime = audioOffset;
-    } else {
-      newAudio.currentTime = 0;
-    }
-    
-    // 如果视频正在播放，立即开始播放新音频
-    if (!video.paused) {
-      await newAudio.play().catch(() => {});
-    }
-    
-    // 停止旧音频
-    if (state.audioElement) {
-      state.audioElement.pause();
-      state.audioElement.src = '';
-    }
-    
-    state.audioElement = newAudio;
-    state.currentSegmentStart = startTime;
-    
-    // 设置 ended 事件
-    newAudio.addEventListener('ended', () => {
-      if (state.needAudioTranscode && state.videoPath) {
-        const nextStart = (state.currentSegmentStart || 0) + (state.segmentDuration || 20);
-        loadAudioForSegment(state.videoPath, nextStart);
-      }
-    });
-    
-    const statusEl = document.getElementById('audioStatus');
-    if (statusEl) {
-      statusEl.textContent = '🔊 音频已就绪';
-      setTimeout(() => statusEl.style.display = 'none', 2000);
-    }
-    
-  } catch (error) {
-    console.error('[audio] Legacy load failed:', error);
-  } finally {
-    audioLoading = false;
-  }
-}
-
-// 拖动时重新加载音频
-function onSeekToPosition(percent) {
-  if (!state.videoPath || !state.needAudioTranscode) return;
-  
-  const duration = state.videoDuration || video.duration;
-  if (!duration || duration <= 0) return;
-  
-  const seekTime = percent * duration;
-  
-  // 检查是否在当前片段范围内
-  const segmentDuration = state.segmentDuration || 20;
-  const currentStart = state.currentSegmentStart || 0;
-  const currentEnd = currentStart + segmentDuration;
-  
-  // 如果拖动位置超出当前片段，重新加载音频
-  if (seekTime < currentStart || seekTime > currentEnd - 5) {
-    // 对于 MSE 模式，需要重新初始化
-    if (state.mediaSource) {
-      // 重置 MediaSource
-      if (state.sourceBuffer) {
-        try {
-          state.mediaSource.removeSourceBuffer(state.sourceBuffer);
-        } catch (e) {}
-      }
-      state.sourceBuffer = null;
-      state.audioSegments = [];
-      
-      // 重新初始化
-      initMediaSourceAudio();
-    }
-    
-    const newStart = Math.max(0, seekTime - 3);
-    loadAudioForSegment(state.videoPath, newStart);
-  } else if (state.audioElement) {
-    // 在当前片段范围内，同步音频位置
-    const audioOffset = seekTime - currentStart;
-    if (audioOffset >= 0) {
-      state.audioElement.currentTime = audioOffset;
-    }
-  }
-}
-
-// ============================================================
-// 预设管理功能
-// ============================================================
-
-// 刷新预设列表
-async function refreshPresets() {
-  try {
-    const response = await fetch('/api/presets');
-    if (!response.ok) throw new Error('获取预设失败');
-    
-    const data = await response.json();
-    const select = document.getElementById('presetSelect');
-    
-    // 保留第一个选项
-    select.innerHTML = '<option value="">-- 选择预设 --</option>';
-    
-    data.presets.forEach(preset => {
-      const option = document.createElement('option');
-      option.value = preset.id;
-      option.textContent = preset.name + (preset.is_default ? ' ⭐' : '');
-      select.appendChild(option);
-    });
-    
-    // 如果有默认预设，自动选中
-    const defaultPreset = data.presets.find(p => p.is_default);
-    if (defaultPreset) {
-      select.value = defaultPreset.id;
-      loadPreset(defaultPreset.id);
-    }
-    
-  } catch (error) {
-    console.error('刷新预设失败:', error);
-  }
-}
-
-// 加载预设
-async function loadPreset(presetId) {
-  if (!presetId) return;
-  
-  try {
-    const response = await fetch(`/api/presets/${presetId}`);
-    if (!response.ok) throw new Error('获取预设详情失败');
-    
-    const preset = await response.json();
-    const params = preset.params;
-    
-    // 应用预设参数到 UI
-    document.getElementById('timeOffset').value = params.timeOffset || 0;
-    document.getElementById('positionY').value = params.positionY || 'bottom';
-    document.getElementById('marginBottom').value = params.marginBottom || 30;
-    document.getElementById('marginTop').value = params.marginTop || 30;
-    document.getElementById('fontSize').value = params.fontSize || 24;
-    document.getElementById('fontFamily').value = params.fontFamily || 'sans-serif';
-    document.getElementById('fontColor').value = params.fontColor || '#ffffff';
-    document.getElementById('fontColorText').value = params.fontColor || '#ffffff';
-    document.getElementById('fontWeight').value = params.fontWeight || 'bold';
-    document.getElementById('outlineWidth').value = params.outlineWidth || 2;
-    document.getElementById('outlineColor').value = params.outlineColor || '#000000';
-    document.getElementById('outlineColorText').value = params.outlineColor || '#000000';
-    document.getElementById('shadowOffset').value = params.shadowOffset || 2;
-    document.getElementById('bgOpacity').value = params.bgOpacity || 0;
-    
-    // 更新显示值
-    document.getElementById('timeOffsetVal').textContent = (params.timeOffset || 0).toFixed(1);
-    document.getElementById('marginBottomVal').textContent = params.marginBottom || 30;
-    document.getElementById('marginTopVal').textContent = params.marginTop || 30;
-    document.getElementById('fontSizeVal').textContent = params.fontSize || 24;
-    document.getElementById('outlineWidthVal').textContent = params.outlineWidth || 2;
-    document.getElementById('shadowOffsetVal').textContent = params.shadowOffset || 2;
-    document.getElementById('bgOpacityVal').textContent = params.bgOpacity || 0;
-    
-    // 应用压制选项（如果预设中包含）
-    if (params.burnSubMode) document.getElementById('burnSubMode').value = params.burnSubMode;
-    if (params.burnKeepOriginal) document.getElementById('burnKeepOriginal').value = params.burnKeepOriginal;
-    if (params.burnSubName) document.getElementById('burnSubName').value = params.burnSubName;
-    if (params.burnCodec) document.getElementById('burnCodec').value = params.burnCodec;
-    if (params.burnCrf) document.getElementById('burnCrf').value = params.burnCrf;
-    if (params.burnPreset) document.getElementById('burnPreset').value = params.burnPreset;
-    
-    // 应用字幕语言保留设置（如果预设中包含）
-    if (params.subKeepMode || params.subKeepLanguages !== undefined) {
-      // 设置单选按钮
-      if (params.subKeepMode) {
-        const radio = document.querySelector(`input[name="subKeepMode"][value="${params.subKeepMode}"]`);
-        if (radio) radio.checked = true;
-      }
-      // 设置语言输入框
-      if (params.subKeepLanguages !== undefined) {
-        document.getElementById('subKeepLanguages').value = params.subKeepLanguages;
-      }
-      // 保存到 state 和 localStorage
-      state.subKeepMode = params.subKeepMode || 'all_except';
-      state.subKeepLanguages = params.subKeepLanguages || '';
-      
-      // 根据模式设置 removeSubtitleMode
-      if (params.subKeepMode === 'delete_all') {
-        state.removeSubtitleMode = 'all';
-      } else if (params.subKeepLanguages) {
-        state.removeSubtitleMode = 'language';
-      } else {
-        state.removeSubtitleMode = '';
-      }
-      
-      localStorage.setItem('subKeepMode', state.subKeepMode);
-      localStorage.setItem('subKeepLanguages', state.subKeepLanguages);
-      localStorage.setItem('removeSubtitleMode', state.removeSubtitleMode);
-      updateSubDeleteStatus();
-    }
-    
-    // 保存压制设置到 localStorage
-    loadBurnSettingsFromUI();
-    
-    // 更新参数
-    updateParams();
-    
-    showToast(`已加载预设: ${preset.name}`, 'success');
-    
-  } catch (error) {
-    showToast('加载预设失败: ' + error.message, 'error');
-  }
-}
-
-// 显示保存预设弹窗
-function showSavePresetDialog() {
-  // 从 localStorage 读取当前内嵌字幕状态，同步到弹窗 UI
-  syncSubtitleKeepToDialog();
-  // 加载已有预设列表到覆盖下拉框
-  loadOverwritePresetList();
-  // 更新参数预览
-  updatePresetPreview();
-  document.getElementById('savePresetModal').classList.add('active');
-  document.getElementById('presetName').focus();
-}
-
-// 加载已有预设到覆盖下拉框
-async function loadOverwritePresetList() {
-  try {
-    const response = await fetch('/api/presets');
-    if (!response.ok) return;
-    const data = await response.json();
-    const select = document.getElementById('overwritePresetSelect');
-    select.innerHTML = '<option value="">-- 选择要覆盖的预设 --</option>';
-    data.presets.forEach(preset => {
-      const option = document.createElement('option');
-      option.value = preset.id;
-      option.textContent = preset.name + (preset.is_default ? ' ⭐' : '');
-      select.appendChild(option);
-    });
-  } catch (e) {
-    console.error('加载预设列表失败:', e);
-  }
-}
-
-// 切换保存模式
-function toggleSaveMode() {
-  const mode = document.querySelector('input[name="saveMode"]:checked').value;
-  const overwriteWrap = document.getElementById('overwriteSelectWrap');
-  const nameInput = document.getElementById('presetName');
-  const descInput = document.getElementById('presetDescription');
-  
-  if (mode === 'overwrite') {
-    overwriteWrap.style.display = 'block';
-  } else {
-    overwriteWrap.style.display = 'none';
-    nameInput.disabled = false;
-    nameInput.style.opacity = '1';
-    descInput.disabled = false;
-    descInput.style.opacity = '1';
-  }
-}
-
-// 选择要覆盖的预设
-function onOverwritePresetChange() {
-  const select = document.getElementById('overwritePresetSelect');
-  const presetId = select.value;
-  if (!presetId) return;
-  
-  // 从下拉框获取预设名称
-  const option = select.options[select.selectedIndex];
-  document.getElementById('presetName').value = option.textContent.replace(' ⭐', '');
-  document.getElementById('presetName').disabled = true;
-  document.getElementById('presetName').style.opacity = '0.6';
-  document.getElementById('presetDescription').disabled = true;
-  document.getElementById('presetDescription').style.opacity = '0.6';
-}
-
-// 将当前内嵌字幕删除状态同步到保存预设弹窗
-function syncSubtitleKeepToDialog() {
-  const mode = localStorage.getItem('removeSubtitleMode') || '';
-  const subKeepMode = localStorage.getItem('subKeepMode') || 'all_except';
-  const subKeepLanguages = localStorage.getItem('subKeepLanguages') || '';
-
-  // 根据是否有字幕删除状态决定复选框勾选和区域可见性
-  const hasSubtitleSetting = mode === 'all' || (mode === 'language' && subKeepLanguages);
-  const checkbox = document.querySelector('.preset-category[value="subtitle_keep"]');
-  checkbox.checked = hasSubtitleSetting;
-  toggleSubtitleKeepSection();
-
-  if (mode === 'all') {
-    document.querySelector('input[name="subKeepMode"][value="delete_all"]').checked = true;
-    document.getElementById('subKeepLanguages').value = '';
-    document.getElementById('subKeepLangSection').style.display = 'none';
-  } else if (mode === 'language' && subKeepLanguages) {
-    const radio = document.querySelector(`input[name="subKeepMode"][value="${subKeepMode}"]`);
-    if (radio) radio.checked = true;
-    document.getElementById('subKeepLanguages').value = subKeepLanguages;
-    document.getElementById('subKeepLangSection').style.display = 'block';
-  } else {
-    document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
-    document.getElementById('subKeepLanguages').value = '';
-    document.getElementById('subKeepLangSection').style.display = 'block';
-  }
-}
-
-// 关闭保存预设弹窗
-function closeSavePresetDialog() {
-  document.getElementById('savePresetModal').classList.remove('active');
-  document.getElementById('presetName').value = '';
-  document.getElementById('presetName').disabled = false;
-  document.getElementById('presetName').style.opacity = '1';
-  document.getElementById('presetDescription').value = '';
-  document.getElementById('presetDescription').disabled = false;
-  document.getElementById('presetDescription').style.opacity = '1';
-  document.getElementById('presetIsDefault').checked = false;
-  document.getElementById('subKeepLanguages').value = '';
-  document.getElementById('overwritePresetSelect').innerHTML = '<option value="">-- 选择要覆盖的预设 --</option>';
-  // 恢复保存模式
-  document.querySelector('input[name="saveMode"][value="new"]').checked = true;
-  document.getElementById('overwriteSelectWrap').style.display = 'none';
-  // 恢复分类勾选
-  document.querySelectorAll('.preset-category').forEach(cb => cb.checked = true);
-  document.querySelector('input[name="subKeepMode"][value="all_except"]').checked = true;
-  document.getElementById('subKeepLangSection').style.display = 'block';
-}
-
-// 切换字幕保留模式
-function toggleSubKeepMode() {
-  const mode = document.querySelector('input[name="subKeepMode"]:checked')?.value;
-  const langSection = document.getElementById('subKeepLangSection');
-  if (mode === 'delete_all') {
-    langSection.style.display = 'none';
-  } else {
-    langSection.style.display = 'block';
-  }
-}
-
-// 切换内嵌字幕保留区域显示/隐藏
-function toggleSubtitleKeepSection() {
-  const checked = document.querySelector('.preset-category[value="subtitle_keep"]').checked;
-  const section = document.getElementById('subtitleKeepSection');
-  section.style.display = checked ? 'block' : 'none';
-  updatePresetPreview();
-}
-
-// 更新参数预览
-function updatePresetPreview() {
-  const preview = document.getElementById('presetPreview');
-  const p = state.params;
-  
-  const positionMap = { 'bottom': '底部', 'top': '顶部', 'center': '居中' };
-  const weightMap = { 'normal': '正常', 'bold': '粗体', 'lighter': '细体' };
-  
-  // 读取压制选项
-  const burnSubMode = document.getElementById('burnSubMode').value;
-  const burnKeepOriginal = document.getElementById('burnKeepOriginal').value;
-  const burnSubName = document.getElementById('burnSubName').value;
-  const burnCodec = document.getElementById('burnCodec').value;
-  const burnCrf = document.getElementById('burnCrf').value;
-  const burnPreset = document.getElementById('burnPreset').value;
-  
-  const codecMap = {
-    'libx264': 'CPU·H.264', 'libx265': 'CPU·H.265',
-    'h264_nvenc': 'GPU·H.264', 'hevc_nvenc': 'GPU·H.265',
-    'h264_qsv': 'GPU·QSV H.264'
-  };
-  const modeMap = { 'burn': '硬字幕', 'soft': '软字幕' };
-  
-  // 字幕语言保留设置 — 弹窗打开时从 UI 读取，否则从 localStorage 读取
-  const dialogOpen = document.getElementById('savePresetModal').classList.contains('active');
-  let removeMode, subKeepModeVal, subKeepLangs;
-  if (dialogOpen) {
-    // 弹窗已打开，从 UI 元素读取实时状态
-    subKeepModeVal = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
-    subKeepLangs = document.getElementById('subKeepLanguages')?.value?.trim() || '';
-    removeMode = subKeepModeVal === 'delete_all' ? 'all' : (subKeepLangs ? 'language' : '');
-  } else {
-    // 弹窗未打开，从 localStorage 读取
-    removeMode = localStorage.getItem('removeSubtitleMode') || '';
-    subKeepModeVal = localStorage.getItem('subKeepMode') || 'all_except';
-    subKeepLangs = localStorage.getItem('subKeepLanguages') || '';
-  }
-  let subKeepDisplay;
-  if (removeMode === 'all' || subKeepModeVal === 'delete_all') {
-    subKeepDisplay = '删除全部内嵌字幕';
-  } else if ((removeMode === 'language' || subKeepLangs) && subKeepLangs) {
-    const modeLabel = subKeepModeVal === 'all_except' ? '保留指定语言' : '删除指定语言';
-    subKeepDisplay = `${modeLabel}: ${subKeepLangs}`;
-  } else {
-    subKeepDisplay = '未设置（保留所有）';
-  }
-  
-  // 压制选项预览
-  const burnPreview = `
-    <div style="margin-top:6px; padding-top:6px; border-top:1px solid #333;">
-      <div>🔥 模式: ${modeMap[burnSubMode] || '硬字幕'} | 编码: ${codecMap[burnCodec] || burnCodec} | CRF: ${burnCrf}</div>
-      <div>⚙️ 预设: ${burnPreset} | 原字幕: ${burnKeepOriginal === 'true' ? '保留' : '删除'} | 轨道名: ${burnSubName}</div>
-    </div>
-  `;
-  
-  preview.innerHTML = `
-    <div>⏱️ 偏移: ${p.timeOffset}s</div>
-    <div>📍 位置: ${positionMap[p.positionY] || '底部'} | 底边距: ${p.marginBottom}px | 顶边距: ${p.marginTop}px</div>
-    <div>🔤 字号: ${p.fontSize}px | 字体: ${p.fontFamily} | 粗细: ${weightMap[p.fontWeight] || '粗体'}</div>
-    <div>🎨 颜色: <span style="color:${p.fontColor}">${p.fontColor}</span></div>
-    <div>✨ 描边: ${p.outlineWidth}px | 阴影: ${p.shadowOffset}px | 背景: ${p.bgOpacity}%</div>
-    ${burnPreview}
-    <div style="margin-top:6px; padding-top:6px; border-top:1px solid #333;">
-      <div>🎬 内嵌字幕: ${subKeepDisplay}</div>
-    </div>
-  `;
-}
-
-// 保存预设
-async function savePreset() {
-  const name = document.getElementById('presetName').value.trim();
-  if (!name) {
-    showToast('请输入预设名称', 'error');
-    return;
-  }
-  
-  const description = document.getElementById('presetDescription').value.trim();
-  const isDefault = document.getElementById('presetIsDefault').checked;
-  
-  // 根据选中的分类收集参数
-  const categories = [...document.querySelectorAll('.preset-category:checked')].map(cb => cb.value);
-  const params = {};
-  
-  if (categories.includes('subtitle_style')) {
-    params.fontSize = state.params.fontSize;
-    params.fontFamily = state.params.fontFamily;
-    params.fontColor = state.params.fontColor;
-    params.fontWeight = state.params.fontWeight;
-    params.positionY = state.params.positionY;
-    params.marginBottom = state.params.marginBottom;
-    params.marginTop = state.params.marginTop;
-    params.outlineWidth = state.params.outlineWidth;
-    params.outlineColor = state.params.outlineColor;
-    params.shadowOffset = state.params.shadowOffset;
-    params.bgOpacity = state.params.bgOpacity;
-  }
-  
-  if (categories.includes('burn_options')) {
-    params.burnSubMode = document.getElementById('burnSubMode').value;
-    params.burnKeepOriginal = document.getElementById('burnKeepOriginal').value;
-    params.burnSubName = document.getElementById('burnSubName').value;
-    params.burnCodec = document.getElementById('burnCodec').value;
-    params.burnCrf = document.getElementById('burnCrf').value;
-    params.burnPreset = document.getElementById('burnPreset').value;
-  }
-  
-  if (categories.includes('time_offset')) {
-    params.timeOffset = state.params.timeOffset;
-  }
-  
-  if (categories.includes('subtitle_keep')) {
-    const subKeepMode = document.querySelector('input[name="subKeepMode"]:checked')?.value || 'all_except';
-    params.subKeepMode = subKeepMode;
-    if (subKeepMode !== 'delete_all') {
-      params.subKeepLanguages = document.getElementById('subKeepLanguages').value.trim();
-    } else {
-      params.subKeepLanguages = '';
-    }
-  }
-  
-  if (categories.length === 0) {
-    showToast('请至少选择一个保存范围', 'error');
-    return;
-  }
-  
-  params._categories = categories;
-  
-  // 判断是新建还是覆盖
-  const saveMode = document.querySelector('input[name="saveMode"]:checked').value;
-  const overwritePresetId = document.getElementById('overwritePresetSelect').value;
-  
-  try {
-    const fd = new FormData();
-    fd.append('name', name);
-    fd.append('description', description);
-    fd.append('params', JSON.stringify(params));
-    fd.append('is_default', isDefault ? 'true' : 'false');
-    
-    let response;
-    if (saveMode === 'overwrite' && overwritePresetId) {
-      // 覆盖已有预设
-      response = await fetch(`/api/presets/${overwritePresetId}`, {
-        method: 'PUT',
-        body: fd
-      });
-    } else {
-      // 新建预设
-      response = await fetch('/api/presets', {
-        method: 'POST',
-        body: fd
-      });
-    }
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || '保存失败');
-    }
-    
-    const result = await response.json();
-    const action = (saveMode === 'overwrite' && overwritePresetId) ? '更新' : '保存';
-    showToast(`预设 "${name}" ${action}成功`, 'success');
-    
-    closeSavePresetDialog();
-    refreshPresets();
-    
-  } catch (error) {
-    showToast('保存预设失败: ' + error.message, 'error');
-  }
-}
-
-// 显示管理预设弹窗
-async function showPresetManager() {
-  document.getElementById('presetManagerModal').classList.add('active');
-  await loadPresetManagerList();
-}
-
-// 关闭管理预设弹窗
-function closePresetManager() {
-  document.getElementById('presetManagerModal').classList.remove('active');
-}
-
-// 加载预设管理列表
-async function loadPresetManagerList() {
-  const list = document.getElementById('presetManagerList');
-  const info = document.getElementById('presetManagerInfo');
-  
-  try {
-    const response = await fetch('/api/presets');
-    if (!response.ok) throw new Error('获取预设失败');
-    
-    const data = await response.json();
-    info.textContent = `共 ${data.total} 个预设`;
-    
-    if (data.presets.length === 0) {
-      list.innerHTML = '<div style="text-align:center; color:#666; padding:40px;">暂无预设，请先保存一个预设</div>';
-      return;
-    }
-    
-    list.innerHTML = data.presets.map(preset => `
-      <div style="padding:14px; border-bottom:1px solid #333; display:flex; align-items:center; gap:12px;">
-        <div style="flex:1; min-width:0;">
-          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-            <span style="font-size:14px; font-weight:500; color:#e5e5e5;">${preset.name}</span>
-            ${preset.is_default ? '<span style="background:#3b82f6; color:#fff; padding:2px 8px; border-radius:4px; font-size:10px;">默认</span>' : ''}
-          </div>
-          ${preset.description ? `<div style="font-size:12px; color:#999; margin-bottom:4px;">${preset.description}</div>` : ''}
-          <div style="font-size:11px; color:#666;">
-            更新于: ${new Date(preset.updated_at).toLocaleString()}
-          </div>
-        </div>
-        <div style="display:flex; gap:6px; flex-shrink:0;">
-          ${!preset.is_default ? `<button onclick="setDefaultPreset(${preset.id})" style="padding:6px 10px; background:transparent; border:1px solid #444; color:#999; border-radius:4px; cursor:pointer; font-size:11px;" title="设为默认">⭐</button>` : ''}
-          <button onclick="showEditPreset(${preset.id})" style="padding:6px 10px; background:transparent; border:1px solid #444; color:#999; border-radius:4px; cursor:pointer; font-size:11px;" title="编辑">✏️</button>
-          <button onclick="deletePreset(${preset.id}, '${preset.name}')" style="padding:6px 10px; background:transparent; border:1px solid #444; color:#ef4444; border-radius:4px; cursor:pointer; font-size:11px;" title="删除">🗑️</button>
-        </div>
-      </div>
-    `).join('');
-    
-  } catch (error) {
-    list.innerHTML = `<div style="text-align:center; color:#ef4444; padding:40px;">加载失败: ${error.message}</div>`;
-  }
-}
-
-// 设置默认预设
-async function setDefaultPreset(presetId) {
-  try {
-    const response = await fetch(`/api/presets/${presetId}/set-default`, {
-      method: 'POST'
-    });
-    
-    if (!response.ok) throw new Error('设置失败');
-    
-    showToast('已设为默认预设', 'success');
-    await loadPresetManagerList();
-    await refreshPresets();
-    
-  } catch (error) {
-    showToast('设置默认预设失败: ' + error.message, 'error');
-  }
-}
-
-// 显示编辑预设弹窗
-async function showEditPreset(presetId) {
-  try {
-    const response = await fetch(`/api/presets/${presetId}`);
-    if (!response.ok) throw new Error('获取预设失败');
-    
-    const preset = await response.json();
-    
-    document.getElementById('editPresetId').value = preset.id;
-    document.getElementById('editPresetName').value = preset.name;
-    document.getElementById('editPresetDescription').value = preset.description || '';
-    document.getElementById('editPresetIsDefault').checked = preset.is_default;
-    
-    document.getElementById('editPresetModal').classList.add('active');
-    
-  } catch (error) {
-    showToast('获取预设信息失败: ' + error.message, 'error');
-  }
-}
-
-// 关闭编辑预设弹窗
-function closeEditPresetDialog() {
-  document.getElementById('editPresetModal').classList.remove('active');
-}
-
-// 更新预设
-async function updatePreset() {
-  const presetId = document.getElementById('editPresetId').value;
-  const name = document.getElementById('editPresetName').value.trim();
-  const description = document.getElementById('editPresetDescription').value.trim();
-  const isDefault = document.getElementById('editPresetIsDefault').checked;
-  
-  if (!name) {
-    showToast('请输入预设名称', 'error');
-    return;
-  }
-  
-  try {
-    const fd = new FormData();
-    fd.append('name', name);
-    fd.append('description', description);
-    fd.append('is_default', isDefault ? 'true' : 'false');
-    
-    const response = await fetch(`/api/presets/${presetId}`, {
-      method: 'PUT',
-      body: fd
-    });
-    
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || '更新失败');
-    }
-    
-    showToast('预设更新成功', 'success');
-    
-    closeEditPresetDialog();
-    await loadPresetManagerList();
-    await refreshPresets();
-    
-  } catch (error) {
-    showToast('更新预设失败: ' + error.message, 'error');
-  }
-}
-
-// 删除预设
-async function deletePreset(presetId, presetName) {
-  if (!confirm(`确定要删除预设 "${presetName}" 吗？`)) {
-    return;
-  }
-  
-  try {
-    const response = await fetch(`/api/presets/${presetId}`, {
-      method: 'DELETE'
-    });
-    
-    if (!response.ok) throw new Error('删除失败');
-    
-    showToast(`预设 "${presetName}" 已删除`, 'success');
-    
-    await loadPresetManagerList();
-    await refreshPresets();
-    
-  } catch (error) {
-    showToast('删除预设失败: ' + error.message, 'error');
-  }
-}
-
-// 应用到压制（添加到队列）
-function applyToBurn() {
-  if (!state.videoPath) {
-    showToast('请先加载视频', 'error');
-    return;
-  }
-  
-  if (!state.subtitlePath) {
-    showToast('请先加载字幕', 'error');
-    return;
-  }
-  
-  // 获取当前参数
-  const params = {
-    videoPath: state.videoPath,
-    videoName: state.videoPath.split('/').pop(),
-    subtitlePath: state.subtitlePath,
-    subtitleName: state.subtitlePath.split('/').pop(),
-    params: { ...state.params },
-    addedAt: new Date().toISOString()
-  };
-  
-  // 检查是否已在队列中
-  const existingIndex = state.burnQueue.findIndex(
-    item => item.videoPath === params.videoPath && item.subtitlePath === params.subtitlePath
-  );
-  
-  if (existingIndex >= 0) {
-    // 更新现有任务
-    state.burnQueue[existingIndex] = params;
-    showToast('已更新队列中的任务', 'success');
-  } else {
-    // 添加新任务
-    state.burnQueue.push(params);
-    showToast('已添加到待压制队列', 'success');
-  }
-  
-  // 保存到 localStorage
-  localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
-  
-  // 更新队列 UI
-  updateQueueUI();
-}
-
-// 打开队列弹窗
-function openQueueModal() {
-  updateQueueUI();
-  document.getElementById('queueModal').classList.add('active');
-}
-
-// 关闭队列弹窗
-function closeQueueModal() {
-  document.getElementById('queueModal').classList.remove('active');
-}
-
-// 更新队列 UI
-function updateQueueUI() {
-  const list = document.getElementById('queueList');
-  const info = document.getElementById('queueInfo');
-  const startBtn = document.getElementById('startBurnBtn');
-  
-  info.textContent = `共 ${state.burnQueue.length} 个任务`;
-  startBtn.disabled = state.burnQueue.length === 0;
-  
-  if (state.burnQueue.length === 0) {
-    list.innerHTML = '<div style="text-align:center; color:#666; padding:40px;">队列为空</div>';
-    return;
-  }
-  
-  list.innerHTML = state.burnQueue.map((item, index) => `
-    <div class="queue-item" style="padding:12px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center;">
-      <div style="flex:1; min-width:0;">
-        <div style="font-size:13px; color:#e5e5e5; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-          📹 ${item.videoName}
-        </div>
-        <div style="font-size:11px; color:#999; margin-top:4px;">
-          💬 ${item.subtitleName}
-        </div>
-        <div style="font-size:11px; color:#666; margin-top:2px;">
-          偏移: ${item.params.timeOffset}s | 字号: ${item.params.fontSize}px | 位置: ${item.params.positionY}
-        </div>
-      </div>
-      <button onclick="removeFromQueue(${index})" style="background:transparent; border:1px solid #666; color:#ef4444; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:11px; margin-left:12px;">
-        删除
+    <!-- Submit -->
+    <div class="submit-bar">
+      <button class="submit-btn" id="btnSubmit" onclick="submitTask()">
+        🚀 提交压制任务
       </button>
     </div>
-  `).join('');
-}
+  </div>
+</div>
 
-// 从队列中删除
-function removeFromQueue(index) {
-  state.burnQueue.splice(index, 1);
-  localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
-  updateQueueUI();
-  showToast('已从队列中删除', 'success');
-}
+<!-- JASSUB v2 (WASM ASS renderer) -->
+<script src="/static/js/jassub.js"></script>
+<script src="/static/js/jassub-worker.js"></script>
 
-// 清空队列
-function clearQueue() {
-  if (state.burnQueue.length === 0) return;
-  
-  if (confirm('确定要清空队列吗？')) {
-    state.burnQueue = [];
-    localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
-    updateQueueUI();
-    showToast('队列已清空', 'success');
-  }
-}
+<script>
+// ===== State =====
+const state = {
+  videoPath: '', subtitlePath: '', sessionId: '', filename: '',
+  subtitleFormat: '', assContent: '', videoBlobUrl: null,
+  jassub: null, previewMode: 'js', ffmpegPreviewActive: false,
+  fontList: [], videoWidth: 0, videoHeight: 0,
+  cacheInfo: { videoCached: false, subtitleCached: false, videoSize: 0, subtitleSize: 0 }
+};
 
-// 开始批量压制
-async function startBatchBurn() {
-  if (state.burnQueue.length === 0) {
-    showToast('队列为空', 'error');
-    return;
-  }
-  
-  const startBtn = document.getElementById('startBurnBtn');
-  startBtn.disabled = true;
-  startBtn.textContent = '提交中...';
-  
-  // 从 UI 获取压制参数
-  const burnSettings = {
-    sub_mode: document.getElementById('burnSubMode').value,
-    keep_original_sub: document.getElementById('burnKeepOriginal').value === 'true',
-    sub_name: document.getElementById('burnSubName').value || '中文字幕',
-    codec: document.getElementById('burnCodec').value,
-    crf: document.getElementById('burnCrf').value,
-    preset: document.getElementById('burnPreset').value
-  };
-  
-  // 保存压制设置到 localStorage
-  localStorage.setItem('burnSettings', JSON.stringify(burnSettings));
-  
-  let successCount = 0;
-  let failCount = 0;
-  
-  for (const item of state.burnQueue) {
-    try {
-      const fd = new FormData();
-      fd.append('video_path', item.videoPath);
-      fd.append('subtitle_path', item.subtitlePath);
-      fd.append('crf', burnSettings.crf);
-      fd.append('preset', burnSettings.preset);
-      fd.append('codec', burnSettings.codec);
-      fd.append('style', '');
-      fd.append('sub_mode', burnSettings.sub_mode);
-      fd.append('keep_original_sub', burnSettings.keep_original_sub);
-      fd.append('sub_name', burnSettings.sub_name);
-      fd.append('preview_params', JSON.stringify(item.params));
-      // 传递延迟删除字幕参数
-      fd.append('remove_subtitle_indices', localStorage.getItem('removeSubtitleIndices') || '');
-      fd.append('remove_subtitle_mode', localStorage.getItem('removeSubtitleMode') || '');
-      // 传递按语言匹配的字幕保留参数
-      fd.append('sub_keep_mode', localStorage.getItem('subKeepMode') || '');
-      fd.append('sub_keep_languages', localStorage.getItem('subKeepLanguages') || '');
-      
-      const response = await fetch('/api/media/burn', {
-        method: 'POST',
-        body: fd
-      });
-      
-      if (response.ok) {
-        successCount++;
-      } else {
-        failCount++;
-        console.error('提交失败:', item.videoName);
+// ===== IndexedDB Cache =====
+const DB_NAME = 'SubtitleBurnerCache';
+const DB_VERSION = 1;
+const STORE_NAME = 'blobs';
+const CACHE_MAX_AGE = 60 * 60 * 1000; // 1 hour
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
       }
-    } catch (error) {
-      failCount++;
-      console.error('提交失败:', error);
-    }
-  }
-  
-  // 清空队列
-  state.burnQueue = [];
-  localStorage.setItem('burnQueue', JSON.stringify(state.burnQueue));
-  updateQueueUI();
-  
-  startBtn.textContent = '🔥 开始压制';
-  startBtn.disabled = false;
-  
-  if (failCount === 0) {
-    showToast(`已成功提交 ${successCount} 个任务`, 'success');
-  } else {
-    showToast(`提交完成：${successCount} 成功，${failCount} 失败`, 'error');
-  }
-  
-  closeQueueModal();
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
 }
 
-// 在新标签页打开
-function openInNewTab() {
-  window.open('/preview', '_blank');
-}
-
-// 动态加载字体列表（从 API 获取，单一数据源）
-async function loadFontOptions() {
+async function cachePut(key, blob) {
   try {
-    const response = await fetch('/api/fonts');
-    if (!response.ok) return;
-    const data = await response.json();
-    const select = document.getElementById('fontFamily');
-    if (!select) return;
-    
-    // 保存当前值
-    const currentValue = select.value || 'sans-serif';
-    
-    // 清空并重建选项
-    select.innerHTML = '';
-    
-    for (const group of data.fonts) {
-      const optgroup = document.createElement('optgroup');
-      optgroup.label = group.category;
-      for (const font of group.fonts) {
-        const option = document.createElement('option');
-        option.value = font;
-        option.textContent = font;
-        optgroup.appendChild(option);
-      }
-      select.appendChild(optgroup);
-    }
-    
-    // 恢复之前的值（如果存在）
-    select.value = currentValue;
-    if (select.value !== currentValue) {
-      // 如果之前的值不存在，选择第一个
-      select.value = select.options[0]?.value || 'sans-serif';
-    }
-  } catch (e) {
-    console.warn('加载字体列表失败:', e);
-  }
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put({ blob, timestamp: Date.now() }, key);
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e) { console.warn('Cache put failed:', e); }
 }
 
-// 页面加载时获取字体列表
-document.addEventListener('DOMContentLoaded', loadFontOptions);
-
-// ===== JASSUB 更新检查 =====
-async function checkJassubUpdate() {
-  const btn = document.getElementById('jassubUpdateBtn');
-  btn.disabled = true;
-  btn.textContent = '⏳ 检查中...';
-  
+async function cacheGet(key) {
   try {
-    // 检查是否有更新
-    const resp = await fetch('/api/jassub/check-update');
-    if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.detail || '检查失败');
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(key);
+    const result = await new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    if (!result) return null;
+    if (Date.now() - result.timestamp > CACHE_MAX_AGE) {
+      cacheDelete(key);
+      return null;
     }
-    
+    return result;
+  } catch (e) { console.warn('Cache get failed:', e); return null; }
+}
+
+async function cacheDelete(key) {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(key);
+    await new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (e) {}
+}
+
+// ===== Session Persistence =====
+function saveSessionInfo(sessionId, videoPath, subtitlePath, filename) {
+  try {
+    localStorage.setItem('lastSession', JSON.stringify({ sessionId, videoPath, subtitlePath, filename, timestamp: Date.now() }));
+  } catch (e) {}
+}
+
+function getLastSession() {
+  try {
+    const raw = localStorage.getItem('lastSession');
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    // Expire after 1 hour
+    if (Date.now() - data.timestamp > CACHE_MAX_AGE) {
+      localStorage.removeItem('lastSession');
+      return null;
+    }
+    return data;
+  } catch (e) { return null; }
+}
+
+// ===== API Helper =====
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return m ? m[2] : null;
+}
+
+function showStatus(text, type = 'loading') {
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = text;
+  badge.className = 'status-badge ' + (type === 'ok' ? '' : type);
+}
+
+function showToast(msg, type = 'info') {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const d = document.createElement('div');
+  d.className = `toast ${type}`;
+  d.textContent = msg;
+  document.body.appendChild(d);
+  setTimeout(() => d.remove(), 3000);
+}
+
+// ===== Font List =====
+async function loadFontList() {
+  try {
+    const resp = await fetch('/api/fonts', { credentials: 'same-origin' });
+    if (!resp.ok) return;
     const data = await resp.json();
-    
-    if (!data.has_update) {
-      showToast(`JASSUB 已是最新版本: ${data.current_version}`, 'success');
-      btn.textContent = '✅ 最新';
-      setTimeout(() => { btn.textContent = '🔄 JASSUB 更新'; btn.disabled = false; }, 2000);
-      return;
+    const sel = document.getElementById('ctrlFont');
+    sel.innerHTML = '<option value="">默认</option>';
+    (data.fonts || []).forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.family;
+      opt.textContent = f.label || f.family;
+      sel.appendChild(opt);
+    });
+    state.fontList = data.fonts || [];
+  } catch (e) { console.warn('Failed to load fonts:', e); }
+}
+
+// ===== Load Video (with IndexedDB cache) =====
+async function loadVideo(videoPath) {
+  const cacheKey = `video:${videoPath}`;
+  document.getElementById('loadText').textContent = '正在加载视频...';
+
+  // Try cache first
+  const cached = await cacheGet(cacheKey);
+  if (cached) {
+    const url = URL.createObjectURL(cached.blob);
+    state.videoBlobUrl = url;
+    state.cacheInfo.videoCached = true;
+    state.cacheInfo.videoSize = cached.blob.size;
+    return url;
+  }
+
+  // Fetch from server
+  document.getElementById('loadText').textContent = '正在下载视频（首次加载较慢）...';
+  const resp = await fetch(`/api/media/stream?path=${encodeURIComponent(videoPath)}`, { credentials: 'same-origin' });
+  if (!resp.ok) throw new Error(`视频加载失败: ${resp.status}`);
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  state.videoBlobUrl = url;
+  state.cacheInfo.videoCached = false;
+  state.cacheInfo.videoSize = blob.size;
+
+  // Cache it
+  cachePut(cacheKey, blob);
+  return url;
+}
+
+// ===== Load Subtitle (with IndexedDB cache) =====
+async function loadSubtitle(subtitlePath) {
+  const cacheKey = `subtitle:${subtitlePath}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached) {
+    const text = await cached.blob.text();
+    state.cacheInfo.subtitleCached = true;
+    state.cacheInfo.subtitleSize = cached.blob.size;
+    return text;
+  }
+
+  const resp = await fetch(`/api/subtitle/content?path=${encodeURIComponent(subtitlePath)}`, { credentials: 'same-origin' });
+  if (!resp.ok) throw new Error(`字幕加载失败: ${resp.status}`);
+  const text = await resp.text();
+  state.cacheInfo.subtitleCached = false;
+  state.cacheInfo.subtitleSize = text.length;
+
+  cachePut(cacheKey, new Blob([text], { type: 'text/plain' }));
+  return text;
+}
+
+// ===== JASSUB v2 Management =====
+function destroyJassub() {
+  if (state.jassub) {
+    try {
+      state.jassub.freeTrack();
+      state.jassub = null;
+    } catch (e) { console.warn('JASSUB freeTrack error:', e); }
+  }
+}
+
+function createJassub(assContent, video) {
+  destroyJassub();
+  const canvas = document.getElementById('assCanvas');
+
+  state.jassub = new JASSUB({
+    video: canvas,
+    subContent: assContent,
+    subCharset: 'UTF-8',
+    fallbackFont: 'sans-serif',
+    workerUrl: '/static/js/jassub-worker.js',
+    wasmUrl: '/static/js/jassub-worker.wasm',
+    availableFonts: {},
+    onError: (err) => {
+      console.error('[JASSUB]', err);
+      showStatus('JASSUB 渲染错误', 'error');
+    },
+    onReady: () => {
+      console.log('[JASSUB] WASM ready');
+      resizeCanvas();
+      showStatus('JASSUB 就绪', 'ok');
     }
-    
-    // 有更新，询问用户
-    const confirmed = confirm(`发现 JASSUB 新版本！\n\n当前: ${data.current_version}\n最新: ${data.latest_version}\n\n是否更新？`);
-    if (!confirmed) {
-      btn.textContent = '🔄 JASSUB 更新';
-      btn.disabled = false;
-      return;
+  });
+
+  // Sync canvas playback with video
+  video.addEventListener('play', () => {
+    if (state.jassub) requestAnimationFrame(renderLoop);
+  });
+  video.addEventListener('seeked', () => {
+    if (state.jassub) state.jassub.resize();
+  });
+}
+
+function renderLoop() {
+  if (!state.jassub) return;
+  const video = document.getElementById('video');
+  if (video.paused && !video.seeking) return;
+  state.jassub.resize();
+  requestAnimationFrame(renderLoop);
+}
+
+function resizeCanvas() {
+  const canvas = document.getElementById('assCanvas');
+  const video = document.getElementById('video');
+  const rect = video.getBoundingClientRect();
+  canvas.width = video.videoWidth || rect.width;
+  canvas.height = video.videoHeight || rect.height;
+}
+
+// ===== Params Collection =====
+function collectParams() {
+  return {
+    fontSize: parseInt(document.getElementById('ctrlSize').value) || 0,
+    fontFamily: document.getElementById('ctrlFont').value || '',
+    fontColor: document.getElementById('ctrlColor').value || '',
+    fontWeight: document.getElementById('ctrlWeight').value || '',
+    outlineWidth: parseFloat(document.getElementById('ctrlOutline').value) || 0,
+    outlineColor: document.getElementById('ctrlOutlineColor').value || '',
+    shadowOffset: parseFloat(document.getElementById('ctrlShadow').value) || 0,
+    positionY: parseInt(document.getElementById('ctrlPosY').value) || 90,
+    marginBottom: parseInt(document.getElementById('ctrlMarginBottom').value) || 0,
+    bgOpacity: parseInt(document.getElementById('ctrlBgOpacity').value) || 0,
+    timeOffset: parseFloat(document.getElementById('ctrlTimeOffset').value) || 0,
+  };
+}
+
+// ===== JASSUB Style Apply (v2 API) =====
+function applyJassubStyles(params) {
+  if (!state.jassub || !state.assContent) return;
+
+  // For ASS files: don't override styles (preserve effects)
+  if (state.subtitleFormat === 'ass') return;
+
+  // For SRT/VTT: create override ASS style
+  const overrides = [];
+  if (params.fontFamily) overrides.push(`{\\fn${params.fontFamily}}`);
+  if (params.fontSize && params.fontSize !== 48) overrides.push(`{\\fs${params.fontSize}}`);
+  if (params.fontColor && params.fontColor !== '#FFFFFF') {
+    const c = hexToAssColor(params.fontColor);
+    overrides.push(`{\\c&H${c}&}`);
+  }
+  if (params.fontWeight === 'bold') overrides.push(`{\\b1}`);
+  if (params.outlineWidth && params.outlineWidth !== 2) overrides.push(`{\\bord${params.outlineWidth}}`);
+  if (params.shadowOffset && params.shadowOffset !== 1) overrides.push(`{\\shad${params.shadowOffset}}`);
+
+  if (overrides.length > 0) {
+    // Re-create JASSUB with override content
+    const overrideContent = state.assContent.replace(
+      /Dialogue:.*?(?=\r?\n|\r|$)/g,
+      (match) => {
+        const parts = match.split(',');
+        if (parts.length >= 10) {
+          const text = parts.slice(9).join(',');
+          parts[9] = overrides.join('') + text;
+        }
+        return parts.join(',');
+      }
+    );
+    destroyJassub();
+    const video = document.getElementById('video');
+    createJassub(overrideContent, video);
+  }
+}
+
+function hexToAssColor(hex) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  // ASS uses BGR format: &HBBGGRR&
+  return `${b.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${r.toString(16).padStart(2, '0')}`;
+}
+
+// ===== FFmpeg Preview =====
+async function generateFFmpegPreview() {
+  if (state.ffmpegPreviewActive) return;
+  const btn = document.getElementById('btnFFmpegPreview');
+  const loading = document.getElementById('ffmpegLoading');
+
+  state.ffmpegPreviewActive = true;
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中...';
+  loading.classList.add('active');
+
+  try {
+    const video = document.getElementById('video');
+    const params = collectParams();
+    params._ffmpeg_preview = true;
+
+    const resp = await fetch('/api/preview', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': getCookie('csrf_token') || '',
+      },
+      body: JSON.stringify({
+        video_path: state.videoPath,
+        subtitle_path: state.subtitlePath,
+        session_id: state.sessionId,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        ...params,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(errText || `HTTP ${resp.status}`);
     }
-    
-    // 执行更新
-    btn.textContent = '⏳ 下载中...';
-    const updateResp = await fetch('/api/jassub/update', { method: 'POST' });
-    if (!updateResp.ok) {
-      const err = await updateResp.json();
-      throw new Error(err.detail || '更新失败');
-    }
-    
-    const result = await updateResp.json();
-    showToast(`JASSUB 已更新到 ${result.version}，刷新页面生效`, 'success');
-    btn.textContent = '✅ 已更新';
-    btn.style.color = '#10b981';
-    
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+
+    // Switch to FFmpeg preview
+    state.ffmpegPreviewActive = true;
+    switchPreviewMode('ffmpeg');
+
+    // Replace video with FFmpeg preview
+    const oldTime = video.currentTime;
+    video.src = url;
+    video.currentTime = 0;
+    video.play();
+    showToast('精确预览已生成（10秒片段）', 'success');
+
+    // Auto-switch back after playback
+    video.addEventListener('ended', function onEnd() {
+      video.removeEventListener('ended', onEnd);
+      if (state.previewMode === 'ffmpeg') {
+        switchPreviewMode('js');
+        showToast('已切换回实时预览', 'info');
+      }
+    }, { once: true });
+
   } catch (e) {
-    showToast('JASSUB 更新失败: ' + e.message, 'error');
-    btn.textContent = '🔄 JASSUB 更新';
+    showToast('精确预览失败: ' + e.message, 'error');
+  } finally {
+    state.ffmpegPreviewActive = false;
+    btn.disabled = false;
+    btn.textContent = '🔍 生成精确预览 (FFmpeg)';
+    loading.classList.remove('active');
+  }
+}
+
+// ===== Preview Mode Toggle =====
+function switchPreviewMode(mode) {
+  state.previewMode = mode;
+  document.getElementById('modeJS').classList.toggle('active', mode === 'js');
+  document.getElementById('modeFFmpeg').classList.toggle('active', mode === 'ffmpeg');
+
+  const canvasWrap = document.getElementById('assCanvasWrap');
+  const video = document.getElementById('video');
+
+  if (mode === 'js') {
+    canvasWrap.style.display = 'block';
+    if (state.videoBlobUrl) {
+      video.src = state.videoBlobUrl;
+      video.currentTime = 0;
+    }
+  } else {
+    canvasWrap.style.display = 'none';
+  }
+}
+
+// ===== Presets =====
+const PRESETS = [
+  { id: 'default', label: '默认', config: { fontSize: 48, fontColor: '#FFFFFF', outlineWidth: 2, shadowOffset: 1, positionY: 90, marginBottom: 20, bgOpacity: 0, timeOffset: 0 } },
+  { id: 'cinema', label: '🎬 电影', config: { fontSize: 42, fontColor: '#FFFF99', outlineWidth: 3, shadowOffset: 2, positionY: 85, marginBottom: 30, bgOpacity: 0, timeOffset: 0 } },
+  { id: 'news', label: '📰 新闻', config: { fontSize: 36, fontColor: '#FFFFFF', outlineWidth: 0, shadowOffset: 0, positionY: 10, marginBottom: 0, bgOpacity: 80, timeOffset: 0 } },
+  { id: 'karaoke', label: '🎤 卡拉OK', config: { fontSize: 56, fontColor: '#FFD700', outlineWidth: 3, shadowOffset: 2, positionY: 80, marginBottom: 40, bgOpacity: 0, timeOffset: 0 } },
+];
+
+function applyPreset(preset) {
+  const c = preset.config;
+  document.getElementById('ctrlSize').value = c.fontSize || 48;
+  document.getElementById('ctrlColor').value = c.fontColor || '#FFFFFF';
+  document.getElementById('ctrlOutline').value = c.outlineWidth ?? 2;
+  document.getElementById('ctrlShadow').value = c.shadowOffset ?? 1;
+  document.getElementById('ctrlPosY').value = c.positionY ?? 90;
+  document.getElementById('ctrlMarginBottom').value = c.marginBottom ?? 20;
+  document.getElementById('ctrlBgOpacity').value = c.bgOpacity ?? 0;
+  document.getElementById('ctrlTimeOffset').value = c.timeOffset ?? 0;
+  updateAllVals();
+  showToast(`已应用预设: ${preset.label}`, 'info');
+}
+
+function renderPresets() {
+  const bar = document.getElementById('presetBar');
+  bar.innerHTML = '';
+  PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = p.label;
+    btn.onclick = () => applyPreset(p);
+    bar.appendChild(btn);
+  });
+}
+
+// ===== Control Value Display =====
+function updateAllVals() {
+  document.getElementById('valSize').textContent = document.getElementById('ctrlSize').value;
+  document.getElementById('valOutline').textContent = document.getElementById('ctrlOutline').value;
+  document.getElementById('valShadow').textContent = document.getElementById('ctrlShadow').value;
+  document.getElementById('valPosY').textContent = document.getElementById('ctrlPosY').value + '%';
+  document.getElementById('valMarginBottom').textContent = document.getElementById('ctrlMarginBottom').value;
+  document.getElementById('valBgOpacity').textContent = document.getElementById('ctrlBgOpacity').value + '%';
+  document.getElementById('valTimeOffset').textContent = document.getElementById('ctrlTimeOffset').value + 's';
+  document.getElementById('valColor').textContent = document.getElementById('ctrlColor').value.toUpperCase();
+}
+
+// ===== Submit Task =====
+async function submitTask() {
+  const btn = document.getElementById('btnSubmit');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ 提交中...';
+
+  try {
+    const params = collectParams();
+    const resp = await fetch('/api/submit', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': getCookie('csrf_token') || '',
+      },
+      body: JSON.stringify({
+        video_path: state.videoPath,
+        subtitle_path: state.subtitlePath,
+        session_id: state.sessionId,
+        filename: state.filename,
+        ...params,
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`提交失败: ${resp.status}`);
+    const data = await resp.json();
+    showToast('任务已提交！3秒后跳转...', 'success');
+    setTimeout(() => window.location.href = '/', 3000);
+  } catch (e) {
+    showToast(e.message, 'error');
   } finally {
     btn.disabled = false;
+    btn.innerHTML = '🚀 提交压制任务';
   }
 }
 
-// 页面卸载时清理 JASSUB
-window.addEventListener('beforeunload', () => {
-  if (state.jassubRenderer) {
-    try { state.jassubRenderer.destroy(); } catch(e) {}
-    state.jassubRenderer = null;
+// ===== Init =====
+async function init() {
+  renderPresets();
+  updateAllVals();
+  await loadFontList();
+
+  // Get params from URL
+  const urlParams = new URLSearchParams(window.location.search);
+  let sessionId = urlParams.get('session');
+  let videoPath = urlParams.get('video');
+  let subtitlePath = urlParams.get('subtitle');
+  let filename = urlParams.get('filename');
+
+  // Try to recover last session if no params
+  if (!sessionId && !videoPath) {
+    const last = getLastSession();
+    if (last) {
+      console.log('[Recovery] Found last session:', last.sessionId);
+      sessionId = last.sessionId;
+      videoPath = last.videoPath;
+      subtitlePath = last.subtitlePath;
+      filename = last.filename;
+      showToast('已恢复上次预览会话', 'info');
+    }
   }
+
+  if (!videoPath || !subtitlePath) {
+    document.getElementById('fileInfo').textContent = '缺少参数，请从控制台选择文件';
+    showStatus('参数错误', 'error');
+    document.getElementById('videoLoading').classList.add('hidden');
+    return;
+  }
+
+  state.videoPath = videoPath;
+  state.subtitlePath = subtitlePath;
+  state.sessionId = sessionId || '';
+  state.filename = filename || videoPath.split('/').pop();
+
+  // Save session info
+  if (sessionId) {
+    saveSessionInfo(sessionId, videoPath, subtitlePath, filename);
+  }
+
+  document.getElementById('fileInfo').innerHTML =
+    `<strong>${state.filename}</strong> <span style="color:var(--text2); margin-left:8px;">${videoPath}</span>`;
+
+  try {
+    // Load subtitle first
+    showStatus('加载字幕...', 'loading');
+    const assContent = await loadSubtitle(subtitlePath);
+    state.assContent = assContent;
+
+    // Detect format
+    state.subtitleFormat = subtitlePath.split('.').pop().toLowerCase();
+    if (state.subtitleFormat === 'ass') {
+      document.getElementById('assBgHint').style.display = 'block';
+    }
+
+    // Update cache info
+    updateCacheInfo();
+
+    // Load video with caching
+    showStatus('加载视频...', 'loading');
+    document.getElementById('loadText').textContent = '正在加载视频（可能需要几分钟）...';
+    const videoUrl = await loadVideo(videoPath);
+
+    const video = document.getElementById('video');
+    video.src = videoUrl;
+
+    video.onloadedmetadata = () => {
+      state.videoWidth = video.videoWidth;
+      state.videoHeight = video.videoHeight;
+      document.getElementById('videoLoading').classList.add('hidden');
+      showStatus('视频已加载', 'ok');
+
+      // Create JASSUB renderer
+      if (state.assContent) {
+        showStatus('初始化 JASSUB...', 'loading');
+        createJassub(state.assContent, video);
+      }
+
+      updateCacheInfo();
+    };
+
+    video.onerror = () => {
+      showStatus('视频加载失败', 'error');
+      document.getElementById('loadText').textContent = '视频加载失败，请检查路径或格式';
+    };
+
+  } catch (e) {
+    showStatus(e.message, 'error');
+    document.getElementById('loadText').textContent = '加载失败: ' + e.message;
+  }
+}
+
+function updateCacheInfo() {
+  const dot = document.getElementById('cacheDot');
+  const text = document.getElementById('cacheText');
+  const v = state.cacheInfo;
+  if (v.videoCached || v.subtitleCached) {
+    dot.className = 'cache-dot hit';
+    const parts = [];
+    if (v.videoCached) parts.push(`视频 ${(v.videoSize/1024/1024).toFixed(1)}MB`);
+    if (v.subtitleCached) parts.push('字幕');
+    text.textContent = `缓存命中: ${parts.join(', ')}`;
+  } else {
+    dot.className = 'cache-dot miss';
+    text.textContent = `首次加载: ${(v.videoSize/1024/1024).toFixed(1)}MB`;
+  }
+}
+
+// ===== Control Event Listeners =====
+function bindControls() {
+  const sliders = ['ctrlSize', 'ctrlOutline', 'ctrlShadow', 'ctrlPosY', 'ctrlMarginBottom', 'ctrlBgOpacity'];
+  sliders.forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('input', () => {
+      updateAllVals();
+      // JASSUB v2 uses canvas — style changes need to re-create renderer for non-ASS
+      // For ASS, styles are preserved in the file, so just resize
+    });
+  });
+
+  const selects = ['ctrlFont', 'ctrlWeight'];
+  selects.forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      // Style changes will take effect on next JASSUB render
+    });
+  });
+
+  document.getElementById('ctrlTimeOffset').addEventListener('change', updateAllVals);
+  document.getElementById('ctrlColor').addEventListener('input', updateAllVals);
+
+  // Video resize observer
+  const observer = new ResizeObserver(() => resizeCanvas());
+  observer.observe(document.getElementById('video'));
+}
+
+// ===== Start =====
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+  bindControls();
 });
 </script>
 </body>
