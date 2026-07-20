@@ -355,10 +355,11 @@
   </div>
 </div>
 
-<!-- JASSUB v2 loaded dynamically by init() -->
+<!-- JASSUB v1.8.8 IIFE bundle -->
+<script src="/static/js/jassub.bundle.js"></script>
 
 <script>
-// ===== State =====
+console.log('[JASSUB] v1.8.8 loaded');
 const state = window.__previewState = {
   videoPath: '', subtitlePath: '', sessionId: '', filename: '',
   subtitleFormat: '', assContent: '', videoBlobUrl: null,
@@ -557,76 +558,49 @@ async function loadSubtitle(subtitlePath) {
   return text;
 }
 
-// ===== JASSUB v2 Management =====
+// ===== JASSUB v1.8.8 Management =====
 function destroyJassub() {
   if (state.jassub) {
-    try {
-      // v2.5.7 uses destroy(), older versions use freeTrack()
-      if (typeof state.jassub.destroy === 'function') {
-        state.jassub.destroy();
-      } else if (typeof state.jassub.freeTrack === 'function') {
-        state.jassub.freeTrack();
-      }
-      state.jassub = null;
-    } catch (e) { console.warn('JASSUB destroy error:', e); }
+    try { state.jassub.destroy(); state.jassub = null; } catch(e) {}
   }
 }
 
-async function createJassub(assContent, video) {
-  const JASSUBClass = window.JASSUBClass;
-  if (!JASSUBClass) {
-    console.warn('[JASSUB] Not loaded yet, will retry in 500ms...');
-    showStatus('等待 JASSUB 加载...', 'loading');
+function createJassub(assContent, video) {
+  if (!window.JASSUB) {
     setTimeout(() => createJassub(assContent, video), 500);
     return;
   }
   destroyJassub();
   try {
-    state.jassub = new JASSUBClass({
+    state.jassub = new JASSUB({
       video: video,
       subContent: assContent,
       subCharset: 'UTF-8',
       fallbackFont: 'sans-serif',
-      workerUrl: '/static/js/jassub-worker-bundle.mjs',
+      workerUrl: '/static/js/jassub-worker.js',
       wasmUrl: '/static/js/jassub-worker.wasm',
       modernWasmUrl: '/static/js/jassub-worker-modern.wasm',
       availableFonts: {},
       queryFonts: 'localandremote',
     });
     console.log('[JASSUB] instance created');
-    showStatus('JASSUB 初始化中...', 'loading');
-
-    // Wait for ready
-    state.jassub.ready?.then?.(() => {
-      console.log('[JASSUB] WASM ready');
-      showStatus('JASSUB 就绪', 'ok');
-    })?.catch?.((e) => {
-      console.warn('[JASSUB] ready error:', e);
-    });
-
-    // After JASSUB ready — just hide overlays, don't touch the canvas
-    setTimeout(() => {
-      const vLoading = document.getElementById('videoLoading');
-      if (vLoading) vLoading.style.display = 'none';
-      const acw = document.getElementById('assCanvasWrap');
-      if (acw) acw.style.display = 'none';
-      console.log('[FIX] overlays hidden');
-    }, 2000);
-
-    // Style overlay — ensure video area has relative positioning
-    const videoArea = document.getElementById('videoArea');
-    if (videoArea) videoArea.style.position = 'relative';
-    showStatus('JASSUB 已加载', 'ok');
-  } catch (e) {
-    console.error('[JASSUB] init error:', e);
-    showStatus('JASSUB 初始化失败', 'error');
+    showStatus('JASSUB 就绪', 'ok');
+  } catch(e) {
+    console.error('[JASSUB] error:', e);
+    showStatus('JASSUB 失败', 'error');
   }
 
-  // JASSUB v2 creates its own canvas inside a Shadow DOM on the video element
-  // Style it to overlay properly
-  styleJassubOverlay();
+  // Hide overlays after 2s
+  setTimeout(() => {
+    document.getElementById('videoLoading')?.style?.display = 'none';
+    document.getElementById('assCanvasWrap')?.style?.display = 'none';
+  }, 2000);
 
-  // Sync canvas playback with video
+  // Sync with video playback
+  video.addEventListener('play', () => {
+    if (state.jassub) requestAnimationFrame(renderLoop);
+  });
+}
   video.addEventListener('play', () => {
     if (state.jassub) requestAnimationFrame(renderLoop);
   });

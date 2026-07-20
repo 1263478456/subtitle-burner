@@ -10,9 +10,10 @@ analyze_*.py
 check_*.py  
 delete_tags.*
 app/static/js/jassub-build/
-app/static/js/jassub.bundle.js
 app/static/js/jassub.js
 app/static/js/jassub.js.map
 app/static/js/jassub-loader.js
+app/static/js/jassub.bundle.mjs
+app/static/js/jassub-worker-bundle.mjs
 node_modules/
 check_*.py 
