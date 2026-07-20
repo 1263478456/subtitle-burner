@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>字幕预览 · Subtitle Preview</title>
+<!-- JASSUB: libass WASM 字幕渲染器 -->
+<script src="https://cdn.jsdelivr.net/npm/jassub@2.0.15/dist/jassub.umd.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -77,6 +79,15 @@ body.embedded .main-container { min-height: 0; }
   position: absolute; top: 0; left: 0; right: 0; bottom: 0;
   pointer-events: none; overflow: hidden;
 }
+
+/* JASSUB Canvas */
+.jassub-canvas {
+  position: absolute !important;
+  top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .subtitle-line { 
   position: absolute; text-align: center; width: 100%;
   padding: 0 20px;
@@ -349,7 +360,7 @@ input[type="range"]::-webkit-slider-thumb {
     <button class="btn btn-ghost btn-sm" onclick="openMediaBrowser('subtitle')">📁 媒体库字幕</button>
     <button class="btn btn-ghost btn-sm" onclick="openQueueModal()">📋 待压制队列</button>
     <button class="btn btn-ghost btn-sm" onclick="openInNewTab()" title="在新标签页打开">↗ 新窗口</button>
-    <button class="btn btn-ghost btn-sm" id="precisePreviewBtn" onclick="generatePrecisePreview()" title="生成与压制完全一致的预览">🔍 精确预览</button>
+    <button class="btn btn-ghost btn-sm" id="precisePreviewBtn" onclick="generatePrecisePreview()" title="生成与压制完全一致的预览">🔍 FFmpeg 精确预览</button>
     <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 添加到队列</button>
   </div>
 </header>
@@ -358,6 +369,7 @@ input[type="range"]::-webkit-slider-thumb {
   <span>📹 视频: <span class="name" id="videoName">未加载</span></span>
   <span>💬 字幕: <span class="name" id="subName">未加载</span></span>
   <span id="audioStatus" style="display:none; color:#10b981;">🔊 音频加载中...</span>
+  <span id="renderMode" style="color:#3b82f6;">🎬 JASSUB 渲染</span>
 </div>
 
 <div class="main-container">
@@ -856,6 +868,7 @@ const state = {
   audioSegments: [],          // 已加载的音频片段
   nextSegmentToLoad: 0,       // 下一个要加载的片段起始时间
   burnQueue: [],              // 待压制队列
+  jassubRenderer: null,       // JASSUB 渲染器实例
   params: {
     timeOffset: 0,
     positionY: 'bottom',
@@ -1088,6 +1101,9 @@ function updateParams() {
   
   // 保存参数到 localStorage
   localStorage.setItem('subtitlePreviewParams', JSON.stringify(state.params));
+  
+  // 更新 JASSUB 样式（如果已初始化）
+  updateJASSUBStyle();
   
   state.currentSubtitleIndex = -1;
   updateSubtitleDisplay();
@@ -1415,6 +1431,10 @@ document.getElementById('subInput').addEventListener('change', (e) => {
     state.subtitleType = detectSubtitleType(file.name);
     parseSubtitle();
     updateFormatHint();
+    
+    // 初始化 JASSUB 渲染器
+    initJASSUB(state.subtitleContent, state.subtitleType);
+    
     document.getElementById('subName').textContent = file.name;
     showToast('字幕已加载: ' + file.name);
   };
@@ -1825,18 +1845,170 @@ function parseASSTime(timeStr) {
   return 0;
 }
 
-// 更新字幕显示
+// ===== JASSUB 字幕渲染 =====
+
+// 初始化 JASSUB 渲染器
+function initJASSUB(subtitleContent, subtitleType) {
+  // 销毁旧渲染器
+  if (state.jassubRenderer) {
+    try { state.jassubRenderer.destroy(); } catch(e) {}
+    state.jassubRenderer = null;
+  }
+  
+  // 检查 JASSUB 是否可用
+  if (typeof JASSUB === 'undefined') {
+    console.warn('[JASSUB] 库未加载，回退到 JS 渲染');
+    return false;
+  }
+  
+  // SRT/VTT 需要转换为 ASS 格式
+  let assContent = subtitleContent;
+  if (subtitleType === 'srt' || subtitleType === 'vtt') {
+    assContent = convertToASS(subtitleContent, subtitleType);
+  }
+  
+  try {
+    state.jassubRenderer = new JASSUB({
+      video: video,
+      content: assContent,
+      subCharset: 'UTF-8',
+      fallbackFont: 'sans-serif',
+      // 禁用 JASSUB 的默认字体加载，使用页面已有的字体
+      availableFonts: {},
+    });
+    
+    // 应用当前样式参数
+    updateJASSUBStyle();
+    
+    // 隐藏 JS 渲染的 overlay（JASSUB 有自己的 canvas）
+    overlay.style.display = 'none';
+    
+    // 更新渲染模式指示器
+    const modeEl = document.getElementById('renderMode');
+    if (modeEl) modeEl.textContent = '🎬 JASSUB 渲染 (libass)';
+    
+    console.log('[JASSUB] 渲染器初始化成功');
+    return true;
+  } catch(e) {
+    console.error('[JASSUB] 初始化失败:', e);
+    state.jassubRenderer = null;
+    return false;
+  }
+}
+
+// 更新 JASSUB 样式（参数变化时调用）
+function updateJASSUBStyle() {
+  if (!state.jassubRenderer) return;
+  
+  const p = state.params;
+  
+  // 颜色转换: #RRGGBB → &H00BBGGRR (ASS 格式)
+  const fontColor = hexToASSColor(p.fontColor);
+  const outlineColor = hexToASSColor(p.outlineColor);
+  
+  // 位置映射: ASS alignment (numpad布局)
+  // 2=底部居中, 8=顶部居中, 5=中间居中
+  let alignment = 2;
+  if (p.positionY === 'top') alignment = 8;
+  else if (p.positionY === 'center') alignment = 5;
+  
+  // 边距
+  const marginV = p.positionY === 'bottom' ? p.marginBottom : p.marginTop;
+  
+  try {
+    state.jassubRenderer.setOverrideStyle({
+      FontName: p.fontFamily,
+      FontSize: p.fontSize,
+      PrimaryColour: fontColor,
+      Bold: p.fontWeight === 'bold' ? -1 : 0,
+      Outline: p.outlineWidth,
+      Shadow: p.shadowOffset,
+      MarginV: marginV,
+      Alignment: alignment,
+      OutlineColour: outlineColor,
+    });
+  } catch(e) {
+    console.warn('[JASSUB] 更新样式失败:', e);
+  }
+}
+
+// 颜色转换: #RRGGBB → &H00BBGGRR
+function hexToASSColor(hex) {
+  if (!hex || hex.length < 7) return '&H00FFFFFF';
+  const r = hex.substring(1, 3);
+  const g = hex.substring(3, 5);
+  const b = hex.substring(5, 7);
+  return `&H00${b}${g}${r}`.toUpperCase();
+}
+
+// 将 SRT/VTT 转换为 ASS 格式
+function convertToASS(content, type) {
+  let ass = `[Script Info]
+Title: Converted from ${type.toUpperCase()}
+ScriptType: v4.00+
+PlayResX: 1920
+PlayResY: 1080
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Sans CJK SC,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,2,2,2,20,20,30,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+`;
+  
+  // 解析 SRT/VTT 并转换为 ASS Dialogue
+  const blocks = content.trim().split(/\n\s*\n/);
+  blocks.forEach(block => {
+    const lines = block.trim().split('\n');
+    let timeLineIdx = lines.findIndex(l => l.includes('-->'));
+    if (timeLineIdx === -1) return;
+    
+    const timeMatch = lines[timeLineIdx].match(
+      /(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})/
+    );
+    if (!timeMatch) return;
+    
+    const startH = parseInt(timeMatch[1]);
+    const startM = parseInt(timeMatch[2]);
+    const startS = parseInt(timeMatch[3]);
+    const startMs = parseInt(timeMatch[4]);
+    const endH = parseInt(timeMatch[5]);
+    const endM = parseInt(timeMatch[6]);
+    const endS = parseInt(timeMatch[7]);
+    const endMs = parseInt(timeMatch[8]);
+    
+    const startASS = `${startH}:${String(startM).padStart(2,'0')}:${String(startS).padStart(2,'0')}.${String(Math.floor(startMs/10)).padStart(2,'0')}`;
+    const endASS = `${endH}:${String(endM).padStart(2,'0')}:${String(endS).padStart(2,'0')}.${String(Math.floor(endMs/10)).padStart(2,'0')}`;
+    
+    const text = lines.slice(timeLineIdx + 1).join('\\N').replace(/<[^>]+>/g, '');
+    if (text.trim()) {
+      ass += `Dialogue: 0,${startASS},${endASS},Default,,0,0,0,,${text}\n`;
+    }
+  });
+  
+  return ass;
+}
+
+// 更新字幕显示（JASSUB 模式）
 function updateSubtitleDisplay() {
-  // 精确预览模式下，字幕已烧入视频，跳过客户端渲染
+  // 精确预览模式下跳过
   if (_precisePreviewActive) return;
   
-  const currentTime = video.currentTime + state.params.timeOffset;
-  
-  // 每5秒输出一次调试信息（避免日志太多）
-  if (Math.floor(currentTime) % 5 === 0 && Math.floor(currentTime) !== state._lastLogTime) {
-    state._lastLogTime = Math.floor(currentTime);
-    console.log(`[display] 当前时间: ${currentTime.toFixed(2)}s, 偏移: ${state.params.timeOffset}s, 字幕数: ${state.parsedSubtitles.length}`);
+  // 如果有 JASSUB 渲染器，只需同步时间
+  if (state.jassubRenderer) {
+    const adjustedTime = video.currentTime + state.params.timeOffset;
+    try {
+      state.jassubRenderer.setCurrentTime(adjustedTime);
+    } catch(e) {}
+    return;
   }
+  
+  // 回退: JS 渲染模式（显示 overlay）
+  overlay.style.display = '';
+  
+  const currentTime = video.currentTime + state.params.timeOffset;
   
   let foundIndex = -1;
   for (let i = 0; i < state.parsedSubtitles.length; i++) {
@@ -1852,14 +2024,9 @@ function updateSubtitleDisplay() {
   
   overlay.innerHTML = '';
   
-  if (foundIndex === -1) {
-    // 没有找到匹配的字幕
-    return;
-  }
+  if (foundIndex === -1) return;
   
   const sub = state.parsedSubtitles[foundIndex];
-  console.log(`[display] 显示字幕 #${foundIndex}:`, sub.text.substring(0, 30));
-  
   const lines = sub.text.split('\n');
   
   lines.forEach((line, index) => {
@@ -2148,6 +2315,10 @@ async function confirmSelection() {
       
       parseSubtitle();
       updateFormatHint();
+      
+      // 初始化 JASSUB 渲染器
+      initJASSUB(state.subtitleContent, state.subtitleType);
+      
       document.getElementById('subName').textContent = fileName;
       showToast('字幕已加载: ' + fileName);
     } catch (error) {
@@ -2189,6 +2360,9 @@ async function loadEmbeddedSubtitle() {
     // 解析字幕
     parseSubtitle();
     updateFormatHint();
+    
+    // 初始化 JASSUB 渲染器
+    initJASSUB(state.subtitleContent, state.subtitleType);
     
     // 更新 UI
     document.getElementById('subName').textContent = data.filename;
@@ -3471,6 +3645,14 @@ async function loadFontOptions() {
 
 // 页面加载时获取字体列表
 document.addEventListener('DOMContentLoaded', loadFontOptions);
+
+// 页面卸载时清理 JASSUB
+window.addEventListener('beforeunload', () => {
+  if (state.jassubRenderer) {
+    try { state.jassubRenderer.destroy(); } catch(e) {}
+    state.jassubRenderer = null;
+  }
+});
 </script>
 </body>
 </html>
