@@ -604,43 +604,48 @@ async function createJassub(assContent, video) {
       console.warn('[JASSUB] ready error:', e);
     });
 
-    // Debug after 3 seconds
+    // Debug after 3 seconds — fix canvas and force render
     setTimeout(() => {
       const va = document.getElementById('videoArea');
       const vid = document.getElementById('video');
-      console.log('[DEBUG] === JASSUB Diagnostic ===');
-      console.log('[DEBUG] videoArea children:', va?.children?.length);
-      for (const c of va?.children || []) {
-        const cs = getComputedStyle(c);
-        console.log('[DEBUG]  child:', c.tagName, 'id:', c.id, 'display:', cs.display, 'z-index:', cs.zIndex, 'position:', cs.position, 'opacity:', cs.opacity);
-      }
-      // Find JASSUB canvas (not our assCanvas)
+      const vw = vid?.videoWidth || 1920;
+      const vh = vid?.videoHeight || 1080;
+
+      // Find JASSUB canvas (not assCanvas) and fix its size
       const canvases = va?.querySelectorAll('canvas');
-      console.log('[DEBUG] canvases found:', canvases?.length);
       for (const cv of canvases || []) {
-        console.log('[DEBUG]  canvas id:', cv.id, 'size:', cv.width, 'x', cv.height, 'z-index:', getComputedStyle(cv).zIndex);
-        // Force JASSUB canvas to top
         if (cv.id !== 'assCanvas') {
+          // This is JASSUB's canvas — set correct size
+          cv.width = vw;
+          cv.height = vh;
+          cv.style.width = '100%';
+          cv.style.height = '100%';
           cv.style.zIndex = '100';
           cv.style.pointerEvents = 'none';
-          console.log('[DEBUG]  -> set z-index: 100');
+          cv.style.objectFit = 'contain';
+          console.log('[FIX] JASSUB canvas resized to', vw, 'x', vh);
         }
       }
-      // Hide video loading overlay completely
-      const vLoading = document.getElementById('videoLoading');
-      if (vLoading) { vLoading.style.display = 'none'; console.log('[DEBUG] hidden videoLoading'); }
-      // Hide ass-canvas-wrap
-      const acw = document.getElementById('assCanvasWrap');
-      if (acw) { acw.style.display = 'none'; console.log('[DEBUG] hidden assCanvasWrap'); }
 
-      console.log('[DEBUG] video paused:', vid?.paused, 'time:', vid?.currentTime);
-      console.log('[DEBUG] subContent len:', assContent?.length);
-      console.log('[DEBUG] === End Diagnostic ===');
+      // Hide overlays
+      const vLoading = document.getElementById('videoLoading');
+      if (vLoading) vLoading.style.display = 'none';
+      const acw = document.getElementById('assCanvasWrap');
+      if (acw) acw.style.display = 'none';
+
+      // Force JASSUB resize with video dimensions
+      if (state.jassub) {
+        try {
+          state.jassub.resize(vw, vh, 0, 0);
+          console.log('[FIX] JASSUB resize called with', vw, 'x', vh);
+        } catch(e) { console.warn('[FIX] resize error:', e); }
+      }
 
       // Force manual render
       if (state.jassub && typeof state.jassub.manualRender === 'function') {
-        state.jassub.manualRender({ expectedDisplayTime: performance.now(), width: vid?.videoWidth || 1920, height: vid?.videoHeight || 1080, mediaTime: vid?.currentTime || 1 });
-        console.log('[JASSUB] manualRender called');
+        const ct = vid?.currentTime || 1;
+        state.jassub.manualRender({ expectedDisplayTime: performance.now(), width: vw, height: vh, mediaTime: ct });
+        console.log('[FIX] manualRender at time', ct);
       }
     }, 3000);
 
