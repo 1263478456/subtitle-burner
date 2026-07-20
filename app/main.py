@@ -517,6 +517,21 @@ def recover_stuck_tasks():
 app = FastAPI(title="字幕烧录工具", version="2.1", lifespan=lifespan, docs_url="/docs", redoc_url="/redoc")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
+# COOP/COEP headers for JASSUB v2 (SharedArrayBuffer + OffscreenCanvas support)
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class COOPCOEPMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        # Add COOP/COEP to preview page and JASSUB assets
+        if path == "/preview" or path.startswith("/static/js/jassub"):
+            response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+            response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+        return response
+
+app.add_middleware(COOPCOEPMiddleware)
+
 # 自定义静态文件类：禁用缓存，确保前端代码更新立即生效
 from starlette.responses import Response as StarletteResponse
 
