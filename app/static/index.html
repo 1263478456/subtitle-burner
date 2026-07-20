@@ -339,8 +339,8 @@ nav a:hover, nav a.active, nav button:hover, nav button.active { background: rgb
       <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid #e2e8f0;">
         <span style="font-size:13px; color:#64748b;">共 <span id="pendingQueueCount">0</span> 个任务</span>
         <div style="display:flex; gap:8px;">
-          <button class="btn btn-ghost" style="font-size:12px; padding:6px 12px;" onclick="clearPendingQueue()">清空队列</button>
-          <button class="btn btn-primary" id="startBatchBurnBtn" style="font-size:12px; padding:6px 12px;" onclick="startBatchBurnFromQueue()" disabled>🔥 开始压制</button>
+          <button style="font-size:12px; padding:6px 12px; background:transparent; border:1px solid #e2e8f0; color:#64748b; border-radius:4px; cursor:pointer;" onclick="clearPendingQueue()">清空队列</button>
+          <button id="startBatchBurnBtn" style="font-size:12px; padding:6px 12px; background:linear-gradient(135deg, #3b82f6, #8b5cf6); color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:500;" onclick="startBatchBurnFromQueue()" disabled>🔥 开始压制</button>
         </div>
       </div>
     </div>

@@ -349,7 +349,7 @@
     <!-- Submit -->
     <div class="submit-bar">
       <button class="submit-btn" id="btnSubmit" onclick="submitTask()">
-        🚀 提交压制任务
+        📋 加入待压制队列
       </button>
     </div>
   </div>
@@ -833,39 +833,54 @@ function updateAllVals() {
   document.getElementById('valColor').textContent = document.getElementById('ctrlColor').value.toUpperCase();
 }
 
-// ===== Submit Task =====
+// ===== Submit Task → Add to Queue =====
 async function submitTask() {
   const btn = document.getElementById('btnSubmit');
   btn.disabled = true;
-  btn.innerHTML = '⏳ 提交中...';
+  btn.innerHTML = '⏳ 加入中...';
 
   try {
     const params = collectParams();
-    const resp = await fetch('/api/submit', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': getCookie('csrf_token') || '',
-      },
-      body: JSON.stringify({
-        video_path: state.videoPath,
-        subtitle_path: state.subtitlePath,
-        session_id: state.sessionId,
-        filename: state.filename,
-        ...params,
-      }),
-    });
+    const item = {
+      videoPath: state.videoPath,
+      subtitlePath: state.subtitlePath,
+      videoName: state.filename || state.videoPath.split('/').pop(),
+      subtitleName: state.subtitlePath.split('/').pop(),
+      params: params,
+    };
 
-    if (!resp.ok) throw new Error(`提交失败: ${resp.status}`);
-    const data = await resp.json();
-    showToast('任务已提交！3秒后跳转...', 'success');
-    setTimeout(() => window.location.href = '/', 3000);
+    let queue = [];
+    try { queue = JSON.parse(localStorage.getItem('burnQueue') || '[]'); } catch(e) {}
+
+    // Check for duplicate
+    const exists = queue.some(q => q.videoPath === item.videoPath && q.subtitlePath === item.subtitlePath);
+    if (exists) {
+      showToast('该视频+字幕组合已在队列中', 'error');
+      return;
+    }
+
+    queue.push(item);
+    localStorage.setItem('burnQueue', JSON.stringify(queue));
+
+    showToast(`已加入待压制队列（共 ${queue.length} 个任务）`, 'success');
+
+    // Notify parent page if in iframe
+    if (window.parent !== window && window.parent.loadPendingQueue) {
+      try { window.parent.loadPendingQueue(); } catch(e) {}
+    }
+
+    // Reset button after a moment
+    setTimeout(() => {
+      btn.innerHTML = '✅ 已加入队列';
+    }, 500);
+
   } catch (e) {
     showToast(e.message, 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '🚀 提交压制任务';
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.innerHTML = '📋 加入待压制队列';
+    }, 2000);
   }
 }
 
