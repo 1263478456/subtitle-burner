@@ -1047,21 +1047,8 @@ async function init() {
   let subtitlePath = urlParams.get('subtitle');
   let filename = urlParams.get('filename');
 
-  // Try to recover last session if no params
-  if (!sessionId && !videoPath) {
-    const last = getLastSession();
-    if (last) {
-      console.log('[Recovery] Found last session:', last.sessionId);
-      sessionId = last.sessionId;
-      videoPath = last.videoPath;
-      subtitlePath = last.subtitlePath;
-      filename = last.filename;
-      showToast('已恢复上次预览会话', 'info');
-    }
-  }
-
+  // No URL params → show file browser immediately
   if (!videoPath || !subtitlePath) {
-    // No URL params and no cached session — show file browser
     document.getElementById('fileInfo').textContent = '请先选择视频和字幕文件';
     showStatus('等待选择文件', 'loading');
     document.getElementById('videoLoading').classList.add('hidden');
