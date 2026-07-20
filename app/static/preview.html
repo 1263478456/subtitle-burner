@@ -561,9 +561,14 @@ async function loadSubtitle(subtitlePath) {
 function destroyJassub() {
   if (state.jassub) {
     try {
-      state.jassub.freeTrack();
+      // v2.5.7 uses destroy(), older versions use freeTrack()
+      if (typeof state.jassub.destroy === 'function') {
+        state.jassub.destroy();
+      } else if (typeof state.jassub.freeTrack === 'function') {
+        state.jassub.freeTrack();
+      }
       state.jassub = null;
-    } catch (e) { console.warn('JASSUB freeTrack error:', e); }
+    } catch (e) { console.warn('JASSUB destroy error:', e); }
   }
 }
 
@@ -657,10 +662,10 @@ function styleJassubOverlay() {
 }
 
 function renderLoop() {
-  if (!state.jassub) return;
+  if (!state.jassub || state.jassub._destroyed) return;
   const video = document.getElementById('video');
-  if (video.paused && !video.seeking) return;
-  state.jassub.resize();
+  if (!video || video.paused && !video.seeking) return;
+  try { state.jassub.resize(); } catch(e) {}
   requestAnimationFrame(renderLoop);
 }
 
@@ -801,26 +806,23 @@ async function generateFFmpegPreview() {
 // ===== Preview Mode Toggle =====
 function switchPreviewMode(mode) {
   state.previewMode = mode;
-  document.getElementById('modeJS').classList.toggle('active', mode === 'js');
-  document.getElementById('modeFFmpeg').classList.toggle('active', mode === 'ffmpeg');
+  document.getElementById('modeJS')?.classList?.toggle('active', mode === 'js');
+  document.getElementById('modeFFmpeg')?.classList?.toggle('active', mode === 'ffmpeg');
 
   const canvasWrap = document.getElementById('assCanvasWrap');
   const video = document.getElementById('video');
 
   if (mode === 'js') {
-    // Re-enable JASSUB overlay
-    canvasWrap.style.display = 'block';
-    // Re-create JASSUB if needed
-    if (state.assContent && !state.jassub) {
+    if (canvasWrap) canvasWrap.style.display = 'block';
+    if (state.assContent && !state.jassub && video) {
       createJassub(state.assContent, video);
     }
-    if (state.videoBlobUrl) {
+    if (state.videoBlobUrl && video) {
       video.src = state.videoBlobUrl;
       video.currentTime = 0;
     }
   } else {
-    // FFmpeg mode: hide JASSUB overlay
-    canvasWrap.style.display = 'none';
+    if (canvasWrap) canvasWrap.style.display = 'none';
     destroyJassub();
   }
 }
@@ -1231,7 +1233,7 @@ function bindControls() {
   const videoEl = document.getElementById('video');
   if (videoEl) {
     const observer = new ResizeObserver(() => {
-      if (state.jassub) {
+      if (state.jassub && !state.jassub._destroyed) {
         try { state.jassub.resize(); } catch(e) {}
       }
     });
