@@ -359,7 +359,7 @@
 
 <script>
 // ===== State =====
-const state = {
+const state = window.__previewState = {
   videoPath: '', subtitlePath: '', sessionId: '', filename: '',
   subtitleFormat: '', assContent: '', videoBlobUrl: null,
   jassub: null, previewMode: 'js', ffmpegPreviewActive: false,
@@ -612,20 +612,36 @@ async function createJassub(assContent, video) {
       console.log('[DEBUG] videoArea children:', va?.children?.length);
       for (const c of va?.children || []) {
         const cs = getComputedStyle(c);
-        console.log('[DEBUG]  child:', c.tagName, 'display:', cs.display, 'z-index:', cs.zIndex, 'position:', cs.position);
+        console.log('[DEBUG]  child:', c.tagName, 'id:', c.id, 'display:', cs.display, 'z-index:', cs.zIndex, 'position:', cs.position, 'opacity:', cs.opacity);
       }
-      const je = va?.querySelector('jassub-element');
-      console.log('[DEBUG] jassub-element found:', !!je);
-      if (je) {
-        const r = je.getBoundingClientRect();
-        console.log('[DEBUG] jassub rect:', r.width, 'x', r.height);
-        const cv = je.querySelector('canvas');
-        console.log('[DEBUG] canvas found:', !!cv, cv ? cv.width+'x'+cv.height : '');
+      // Find JASSUB canvas (not our assCanvas)
+      const canvases = va?.querySelectorAll('canvas');
+      console.log('[DEBUG] canvases found:', canvases?.length);
+      for (const cv of canvases || []) {
+        console.log('[DEBUG]  canvas id:', cv.id, 'size:', cv.width, 'x', cv.height, 'z-index:', getComputedStyle(cv).zIndex);
+        // Force JASSUB canvas to top
+        if (cv.id !== 'assCanvas') {
+          cv.style.zIndex = '100';
+          cv.style.pointerEvents = 'none';
+          console.log('[DEBUG]  -> set z-index: 100');
+        }
       }
+      // Hide video loading overlay completely
+      const vLoading = document.getElementById('videoLoading');
+      if (vLoading) { vLoading.style.display = 'none'; console.log('[DEBUG] hidden videoLoading'); }
+      // Hide ass-canvas-wrap
+      const acw = document.getElementById('assCanvasWrap');
+      if (acw) { acw.style.display = 'none'; console.log('[DEBUG] hidden assCanvasWrap'); }
+
       console.log('[DEBUG] video paused:', vid?.paused, 'time:', vid?.currentTime);
-      console.log('[DEBUG] subContent len:', assContent?.length, 'preview:', assContent?.substring(0, 80));
-      // Force resize
-      if (state.jassub) { state.jassub.resize(); console.log('[JASSUB] forced resize'); }
+      console.log('[DEBUG] subContent len:', assContent?.length);
+      console.log('[DEBUG] === End Diagnostic ===');
+
+      // Force manual render
+      if (state.jassub && typeof state.jassub.manualRender === 'function') {
+        state.jassub.manualRender({ expectedDisplayTime: performance.now(), width: vid?.videoWidth || 1920, height: vid?.videoHeight || 1080, mediaTime: vid?.currentTime || 1 });
+        console.log('[JASSUB] manualRender called');
+      }
     }, 3000);
 
     // Style overlay — ensure video area has relative positioning
