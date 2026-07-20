@@ -370,6 +370,7 @@ input[type="range"]::-webkit-slider-thumb {
   <span>💬 字幕: <span class="name" id="subName">未加载</span></span>
   <span id="audioStatus" style="display:none; color:#10b981;">🔊 音频加载中...</span>
   <span id="renderMode" style="color:#3b82f6;">🎬 JASSUB 渲染</span>
+  <span id="renderModeHint" style="display:none; font-size:10px;"></span>
 </div>
 
 <div class="main-container">
@@ -1102,8 +1103,10 @@ function updateParams() {
   // 保存参数到 localStorage
   localStorage.setItem('subtitlePreviewParams', JSON.stringify(state.params));
   
-  // 更新 JASSUB 样式（如果已初始化）
-  updateJASSUBStyle();
+  // 只有 SRT/VTT 模式才更新 JASSUB 样式（ASS 保留原始样式）
+  if (state.jassubStyleMode === 'custom') {
+    updateJASSUBStyle();
+  }
   
   state.currentSubtitleIndex = -1;
   updateSubtitleDisplay();
@@ -1861,9 +1864,14 @@ function initJASSUB(subtitleContent, subtitleType) {
     return false;
   }
   
+  // 判断是否需要应用用户样式覆盖
+  // ASS/SSA 文件：保留原始样式（特效依赖原始样式参数）
+  // SRT/VTT 文件：需要应用用户样式（因为转换后的 ASS 使用默认样式）
+  const needOverrideStyle = (subtitleType === 'srt' || subtitleType === 'vtt');
+  
   // SRT/VTT 需要转换为 ASS 格式
   let assContent = subtitleContent;
-  if (subtitleType === 'srt' || subtitleType === 'vtt') {
+  if (needOverrideStyle) {
     assContent = convertToASS(subtitleContent, subtitleType);
   }
   
@@ -1877,15 +1885,25 @@ function initJASSUB(subtitleContent, subtitleType) {
       availableFonts: {},
     });
     
-    // 应用当前样式参数
-    updateJASSUBStyle();
+    // 只有 SRT/VTT 转换的才应用用户样式覆盖
+    // ASS 文件保留原始样式，否则特效会失效
+    if (needOverrideStyle) {
+      updateJASSUBStyle();
+    } else {
+      console.log('[JASSUB] ASS 文件，保留原始样式');
+      // 隐藏样式控制面板的提示
+      updateRenderModeHint('original');
+    }
     
     // 隐藏 JS 渲染的 overlay（JASSUB 有自己的 canvas）
     overlay.style.display = 'none';
     
     // 更新渲染模式指示器
     const modeEl = document.getElementById('renderMode');
-    if (modeEl) modeEl.textContent = '🎬 JASSUB 渲染 (libass)';
+    if (modeEl) modeEl.textContent = needOverrideStyle ? '🎬 JASSUB 渲染 (自定义样式)' : '🎬 JASSUB 渲染 (原始样式)';
+    
+    // 记录当前模式
+    state.jassubStyleMode = needOverrideStyle ? 'custom' : 'original';
     
     console.log('[JASSUB] 渲染器初始化成功');
     return true;
@@ -1894,6 +1912,21 @@ function initJASSUB(subtitleContent, subtitleType) {
     state.jassubRenderer = null;
     return false;
   }
+}
+
+// 更新渲染模式提示
+function updateRenderModeHint(mode) {
+  const hintEl = document.getElementById('renderModeHint');
+  if (!hintEl) return;
+  
+  if (mode === 'original') {
+    hintEl.textContent = 'ASS 文件：页面样式控件不影响预览，使用原始字幕样式';
+    hintEl.style.color = '#f59e0b';
+  } else {
+    hintEl.textContent = 'SRT/VTT 文件：页面样式控件可实时调整预览效果';
+    hintEl.style.color = '#10b981';
+  }
+  hintEl.style.display = 'block';
 }
 
 // 更新 JASSUB 样式（参数变化时调用）
