@@ -355,19 +355,12 @@
   </div>
 </div>
 
-<!-- JASSUB v2 (WASM ASS renderer, ES Module) -->
-<script type="module">
-import JASSUB from '/static/js/jassub.js';
-
-// Make JASSUB available globally for the app
-window.JASSUB = JASSUB;
-console.log('[JASSUB] v2 module loaded');
-
-// Fire a custom event so the main script knows JASSUB is ready
-window.dispatchEvent(new Event('jassub-loaded'));
-</script>
+<!-- JASSUB v2 (bundled, no external dependencies) -->
+<script src="/static/js/jassub.bundle.js"></script>
 
 <script>
+// JASSUB is available as window.JASSUB from the bundle
+console.log('[JASSUB] v2 bundle loaded');
 // ===== State =====
 const state = {
   videoPath: '', subtitlePath: '', sessionId: '', filename: '',
@@ -544,9 +537,10 @@ async function loadSubtitle(subtitlePath) {
     return text;
   }
 
-  const resp = await fetch(`/api/subtitle/content?path=${encodeURIComponent(subtitlePath)}`, { credentials: 'same-origin' });
+  const resp = await fetch(`/api/media/file?path=${encodeURIComponent(subtitlePath)}`, { credentials: 'same-origin' });
   if (!resp.ok) throw new Error(`字幕加载失败: ${resp.status}`);
-  const text = await resp.text();
+  const data = await resp.json();
+  const text = data.content || await resp.text();
   state.cacheInfo.subtitleCached = false;
   state.cacheInfo.subtitleSize = text.length;
 
@@ -555,18 +549,7 @@ async function loadSubtitle(subtitlePath) {
 }
 
 // ===== JASSUB v2 Management =====
-let jassubReady = false;
-
-// Wait for JASSUB module to load
-window.addEventListener('jassub-loaded', () => {
-  jassubReady = true;
-  console.log('[JASSUB] Ready to use');
-  // If init already ran and has content waiting, create renderer now
-  if (state.assContent && state.pendingVideo) {
-    createJassub(state.assContent, state.pendingVideo);
-    state.pendingVideo = null;
-  }
-});
+let jassubReady = true; // Bundle is self-contained, ready immediately
 
 function destroyJassub() {
   if (state.jassub) {
@@ -1159,8 +1142,12 @@ function bindControls() {
   document.getElementById('ctrlTimeOffset').addEventListener('change', updateAllVals);
   document.getElementById('ctrlColor').addEventListener('input', updateAllVals);
 
-  // Video resize observer
-  const observer = new ResizeObserver(() => resizeCanvas());
+  // Video resize observer — trigger JASSUB resize
+  const observer = new ResizeObserver(() => {
+    if (state.jassub) {
+      try { state.jassub.resize(); } catch(e) {}
+    }
+  });
   observer.observe(document.getElementById('video'));
 }
 

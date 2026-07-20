@@ -11,6 +11,7 @@ from pathlib import Path
 import ssl
 import tarfile
 import io
+import subprocess
 from datetime import datetime
 
 ssl_ctx = ssl.create_default_context()
@@ -21,7 +22,6 @@ JASSUB_VERSION = "2.0.15"
 
 # 需要从 tarball 中提取的文件（tarball 内路径 -> 输出文件名）
 FILE_MAP = {
-    "package/dist/jassub.js": "jassub.js",
     "package/dist/wasm/jassub-worker.js": "jassub-worker.js",
     "package/dist/wasm/jassub-worker.wasm": "jassub-worker.wasm",
 }
@@ -38,6 +38,20 @@ def get_latest_version() -> str:
     except Exception as e:
         print(f"获取最新版本失败: {e}")
         return ""
+
+
+def list_tarball_files(version: str) -> list:
+    """列出 tarball 中的所有文件"""
+    url = f"https://registry.npmjs.org/jassub/-/jassub-{version}.tgz"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "subtitle-burner"})
+        with urllib.request.urlopen(req, timeout=30, context=ssl_ctx) as resp:
+            tarball_data = resp.read()
+        with tarfile.open(fileobj=io.BytesIO(tarball_data), mode="r:gz") as tar:
+            return [m.name for m in tar.getmembers() if m.isfile()]
+    except Exception as e:
+        print(f"列出文件失败: {e}")
+        return []
 
 
 def download_and_extract(version: str) -> dict:
@@ -87,6 +101,56 @@ def download_and_extract(version: str) -> dict:
     return extracted
 
 
+def build_bundle(version: str) -> bool:
+    """用 esbuild 将 JASSUB 打包为浏览器可用的 IIFE 格式"""
+    import tempfile, shutil as _shutil
+    
+    # 创建临时目录安装依赖
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        
+        # 创建 package.json
+        (tmpdir / "package.json").write_text('{"name":"jassub-build","version":"1.0.0"}')
+        
+        # 安装 jassub
+        print(f"  安装 jassub@{version} 依赖...")
+        result = subprocess.run(
+            ["npm", "install", f"jassub@{version}", "rvfc-polyfill", "abslink"],
+            cwd=str(tmpdir), capture_output=True, timeout=60
+        )
+        if result.returncode != 0:
+            print(f"  [ERROR] npm install 失败: {result.stderr.decode()[-200:]}")
+            return False
+        
+        # 找到 TypeScript 源码路径
+        src_file = tmpdir / "node_modules" / "jassub" / "src" / "jassub.ts"
+        if not src_file.exists():
+            print(f"  [ERROR] 找不到源码: {src_file}")
+            return False
+        
+        # 用 esbuild 打包
+        output_file = OUTPUT_DIR / "jassub.bundle.js"
+        print(f"  esbuild 打包中...")
+        result = subprocess.run(
+            ["npx", "esbuild", str(src_file),
+             "--bundle", "--format=iife", "--global-name=JASSUB",
+             f"--outfile={output_file}", "--platform=browser",
+             "--target=es2020", "--loader:.wasm=empty", "--loader:.ts=ts"],
+            cwd=str(tmpdir), capture_output=True, timeout=30
+        )
+        if result.returncode != 0:
+            print(f"  [ERROR] esbuild 打包失败: {result.stderr.decode()[-200:]}")
+            return False
+        
+        if output_file.exists():
+            size = output_file.stat().st_size
+            print(f"  [OK] jassub.bundle.js ({size:,} bytes)")
+            return True
+        else:
+            print(f"  [ERROR] 打包文件未生成")
+            return False
+
+
 def save_version_info(version: str, files: list):
     info = {
         "current_version": version,
@@ -128,10 +192,18 @@ def main():
     total = len(FILE_MAP)
     if success_count == total:
         print(f"[OK] 全部 {success_count} 个文件下载成功")
-        return 0
     else:
         print(f"[WARN] 只有 {success_count}/{total} 个文件下载成功")
-        return 1
+    
+    # 打包为浏览器可用的 IIFE 格式
+    print()
+    print("打包为浏览器可用格式...")
+    if build_bundle(version_to_download):
+        print("[OK] jassub.bundle.js 打包成功")
+    else:
+        print("[WARN] jassub.bundle.js 打包失败，需手动运行 esbuild")
+    
+    return 0 if success_count == total else 1
 
 
 if __name__ == "__main__":

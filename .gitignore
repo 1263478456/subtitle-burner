@@ -8,4 +8,8 @@ _verify*.py
 add_*.py  
 analyze_*.py  
 check_*.py  
-delete_tags.* 
+delete_tags.*
+app/static/js/jassub-build/
+app/static/js/jassub.js
+app/static/js/jassub.js.map
+node_modules/ 
