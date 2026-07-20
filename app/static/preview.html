@@ -355,13 +355,15 @@
   </div>
 </div>
 
-<!-- JASSUB v2 (bundled, no external dependencies) -->
-<script src="/static/js/jassub.bundle.js"></script>
-
-<script>
-// JASSUB is available as window.JASSUB.default from the IIFE bundle (export default class)
-const JASSUBClass = window.JASSUB?.default || window.JASSUB;
-console.log('[JASSUB] v2 bundle loaded, type:', typeof JASSUBClass);
+<!-- JASSUB v2 (ESM bundle, import.meta.url preserved) -->
+<script type="module">
+import JASSUB from '/static/js/jassub.bundle.mjs';
+window.JASSUBClass = JASSUB;
+console.log('[JASSUB] v2 ESM bundle loaded, type:', typeof JASSUB);
+// Notify the page that JASSUB is ready
+window.__jassubReady = true;
+window.dispatchEvent(new Event('jassub-loaded'));
+</script>
 // ===== State =====
 const state = {
   videoPath: '', subtitlePath: '', sessionId: '', filename: '',
@@ -560,9 +562,10 @@ function destroyJassub() {
 }
 
 function createJassub(assContent, video) {
+  const JASSUBClass = window.JASSUBClass;
   if (!JASSUBClass) {
-    console.error('[JASSUB] Not loaded');
-    showStatus('JASSUB 未加载', 'error');
+    console.warn('[JASSUB] Not loaded yet, will retry...');
+    showStatus('等待 JASSUB 加载...', 'loading');
     return;
   }
   destroyJassub();
@@ -909,10 +912,24 @@ async function browseMedia(type) {
       </div>
     </div>
   `;
-  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  modal.onclick = (e) => {
+    if (e.target === modal) modal.remove();
+    // Event delegation for file browser
+    const item = e.target.closest('[data-action]');
+    if (!item) return;
+    const action = item.dataset.action;
+    const ext = state._browseExtensions || extensions;
+    const ft = state._browseFileType || type;
+    if (action === 'browse-dir') {
+      loadMediaDirectory(ft, item.dataset.path, ext);
+    } else if (action === 'browse-root') {
+      loadMediaDirectory(ft, '', ext);
+    } else if (action === 'select-file') {
+      selectMediaFile(ft, item.dataset.path, item.dataset.name);
+    }
+  };
   document.body.appendChild(modal);
 
-  // Load media files
   await loadMediaDirectory(type, '', type === 'video' ? ['.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.ts', '.m4v'] : ['.srt', '.vtt', '.ass', '.ssa', '.sub']);
 }
 
@@ -921,44 +938,46 @@ async function loadMediaDirectory(fileType, path, extensions) {
   const breadcrumb = document.getElementById('mediaBrowserBreadcrumb');
   if (!list) return;
 
+  // Store current context for event handlers
+  state._browseFileType = fileType;
+  state._browseExtensions = extensions;
+
   // Update breadcrumb
-  breadcrumb.innerHTML = path ? `<span style="cursor:pointer; color:var(--accent);" onclick="loadMediaDirectory('${fileType}', '', ${JSON.stringify(extensions)})">根目录</span> / ${path}` : '根目录';
+  breadcrumb.innerHTML = path
+    ? `<span style="cursor:pointer; color:var(--accent);" data-action="browse-root">根目录</span> / ${path}`
+    : '根目录';
 
   try {
     const resp = await fetch(`/api/media/list?path=${encodeURIComponent(path)}`, { credentials: 'same-origin' });
-    if (!resp.ok) throw new Error('加载失败');
+    if (!resp.ok) throw new Error(`加载失败 (${resp.status})`);
     const data = await resp.json();
     const items = data.items || [];
 
-    // Filter by file type
     const dirs = items.filter(i => i.is_dir);
     const files = items.filter(i => !i.is_dir && extensions.some(ext => i.name.toLowerCase().endsWith(ext)));
 
     let html = '';
 
-    // Parent directory link
     if (path) {
       const parentPath = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-      html += `<div class="media-item" onclick="loadMediaDirectory('${fileType}', '${parentPath.replace(/'/g, "\\'")}', ${JSON.stringify(extensions)})" style="cursor:pointer;">
+      html += `<div class="media-item" data-action="browse-dir" data-path="${escapeAttr(parentPath)}">
         <span class="ic">📁</span><span class="nm">..</span>
       </div>`;
     }
 
-    // Directories
     dirs.forEach(d => {
       const fullPath = path ? `${path}/${d.name}` : d.name;
-      html += `<div class="media-item" onclick="loadMediaDirectory('${fileType}', '${fullPath.replace(/'/g, "\\'")}', ${JSON.stringify(extensions)})" style="cursor:pointer;">
-        <span class="ic">📁</span><span class="nm">${d.name}</span>
+      html += `<div class="media-item" data-action="browse-dir" data-path="${escapeAttr(fullPath)}">
+        <span class="ic">📁</span><span class="nm">${escapeHtml(d.name)}</span>
       </div>`;
     });
 
-    // Files
     files.forEach(f => {
       const fullPath = path ? `${path}/${f.name}` : f.name;
       const sizeMB = f.size ? (f.size / 1024 / 1024).toFixed(1) + ' MB' : '';
-      html += `<div class="media-item" onclick="selectMediaFile('${fileType}', '${fullPath.replace(/'/g, "\\'")}', '${f.name.replace(/'/g, "\\'")}')" style="cursor:pointer; border-color:var(--accent);">
+      html += `<div class="media-item" data-action="select-file" data-path="${escapeAttr(fullPath)}" data-name="${escapeAttr(f.name)}">
         <span class="ic">${fileType === 'video' ? '🎬' : '📝'}</span>
-        <span class="nm">${f.name}</span>
+        <span class="nm">${escapeHtml(f.name)}</span>
         <span class="sz">${sizeMB}</span>
       </div>`;
     });
@@ -969,8 +988,16 @@ async function loadMediaDirectory(fileType, path, extensions) {
 
     list.innerHTML = html;
   } catch (e) {
-    list.innerHTML = `<div style="text-align:center; padding:40px; color:var(--error);">加载失败: ${e.message}</div>`;
+    list.innerHTML = `<div style="text-align:center; padding:40px; color:var(--error);">加载失败: ${escapeHtml(e.message)}</div>`;
   }
+}
+
+function escapeAttr(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function selectMediaFile(fileType, path, name) {
