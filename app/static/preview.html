@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>字幕预览 · Subtitle Preview</title>
-<!-- JASSUB: libass WASM 字幕渲染器 -->
-<script src="https://cdn.jsdelivr.net/npm/jassub@2.0.15/dist/jassub.umd.js"></script>
+<!-- JASSUB: libass WASM 字幕渲染器（本地文件） -->
+<script src="/static/js/jassub.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -361,6 +361,7 @@ input[type="range"]::-webkit-slider-thumb {
     <button class="btn btn-ghost btn-sm" onclick="openQueueModal()">📋 待压制队列</button>
     <button class="btn btn-ghost btn-sm" onclick="openInNewTab()" title="在新标签页打开">↗ 新窗口</button>
     <button class="btn btn-ghost btn-sm" id="precisePreviewBtn" onclick="generatePrecisePreview()" title="生成与压制完全一致的预览">🔍 FFmpeg 精确预览</button>
+    <button class="btn btn-ghost btn-sm" id="jassubUpdateBtn" onclick="checkJassubUpdate()" title="检查 JASSUB 字幕渲染库更新">🔄 JASSUB 更新</button>
     <button class="btn btn-primary btn-sm" onclick="applyToBurn()">🔥 添加到队列</button>
   </div>
 </header>
@@ -1888,9 +1889,9 @@ function initJASSUB(subtitleContent, subtitleType) {
       content: assContent,
       subCharset: 'UTF-8',
       fallbackFont: 'sans-serif',
-      // 显式指定 Worker 和 WASM 文件的 CDN 地址
-      workerUrl: 'https://cdn.jsdelivr.net/npm/jassub@2.0.15/dist/jassub-worker.js',
-      wasmUrl: 'https://cdn.jsdelivr.net/npm/jassub@2.0.15/dist/jassub-worker.wasm',
+      // 使用本地文件路径
+      workerUrl: '/static/js/jassub-worker.js',
+      wasmUrl: '/static/js/jassub-worker.wasm',
       // 禁用 JASSUB 的默认字体加载，使用页面已有的字体
       availableFonts: {},
     });
@@ -3691,6 +3692,58 @@ async function loadFontOptions() {
 
 // 页面加载时获取字体列表
 document.addEventListener('DOMContentLoaded', loadFontOptions);
+
+// ===== JASSUB 更新检查 =====
+async function checkJassubUpdate() {
+  const btn = document.getElementById('jassubUpdateBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 检查中...';
+  
+  try {
+    // 检查是否有更新
+    const resp = await fetch('/api/jassub/check-update');
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || '检查失败');
+    }
+    
+    const data = await resp.json();
+    
+    if (!data.has_update) {
+      showToast(`JASSUB 已是最新版本: ${data.current_version}`, 'success');
+      btn.textContent = '✅ 最新';
+      setTimeout(() => { btn.textContent = '🔄 JASSUB 更新'; btn.disabled = false; }, 2000);
+      return;
+    }
+    
+    // 有更新，询问用户
+    const confirmed = confirm(`发现 JASSUB 新版本！\n\n当前: ${data.current_version}\n最新: ${data.latest_version}\n\n是否更新？`);
+    if (!confirmed) {
+      btn.textContent = '🔄 JASSUB 更新';
+      btn.disabled = false;
+      return;
+    }
+    
+    // 执行更新
+    btn.textContent = '⏳ 下载中...';
+    const updateResp = await fetch('/api/jassub/update', { method: 'POST' });
+    if (!updateResp.ok) {
+      const err = await updateResp.json();
+      throw new Error(err.detail || '更新失败');
+    }
+    
+    const result = await updateResp.json();
+    showToast(`JASSUB 已更新到 ${result.version}，刷新页面生效`, 'success');
+    btn.textContent = '✅ 已更新';
+    btn.style.color = '#10b981';
+    
+  } catch (e) {
+    showToast('JASSUB 更新失败: ' + e.message, 'error');
+    btn.textContent = '🔄 JASSUB 更新';
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // 页面卸载时清理 JASSUB
 window.addEventListener('beforeunload', () => {

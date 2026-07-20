@@ -2811,6 +2811,146 @@ async def list_presets(user: str = Depends(require_auth)):
 async def list_fonts():
     """获取系统可用的中文字体列表（动态检测，单一数据源）"""
     return {"fonts": get_available_fonts()}
+
+# ============================================================
+# JASSUB 更新检查 API
+# ============================================================
+JASSUB_VERSION_FILE = Path("app/static/js/jassub-version.json")
+
+@app.get("/api/jassub/status")
+async def jassub_status(user: str = Depends(require_auth)):
+    """获取当前 JASSUB 版本信息"""
+    if JASSUB_VERSION_FILE.exists():
+        try:
+            info = json.loads(JASSUB_VERSION_FILE.read_text(encoding="utf-8"))
+            return {"installed": True, **info}
+        except Exception:
+            pass
+    return {"installed": False, "current_version": None}
+
+@app.get("/api/jassub/check-update")
+async def jassub_check_update(user: str = Depends(require_auth)):
+    """检查 JASSUB 是否有新版本（从 npm registry 查询）"""
+    import urllib.request
+    import ssl as _ssl
+    
+    # 读取当前版本
+    current_version = None
+    if JASSUB_VERSION_FILE.exists():
+        try:
+            info = json.loads(JASSUB_VERSION_FILE.read_text(encoding="utf-8"))
+            current_version = info.get("current_version")
+        except Exception:
+            pass
+    
+    # 查询 npm 最新版本
+    latest_version = None
+    try:
+        ssl_ctx = _ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = _ssl.CERT_NONE
+        req = urllib.request.Request(
+            "https://registry.npmjs.org/jassub/latest",
+            headers={"User-Agent": "subtitle-burner"}
+        )
+        with urllib.request.urlopen(req, timeout=10, context=ssl_ctx) as resp:
+            data = json.loads(resp.read())
+            latest_version = data.get("version")
+    except Exception as e:
+        logger.warning(f"[JASSUB] 检查更新失败: {e}")
+        raise HTTPException(502, "无法连接 npm registry，请检查网络")
+    
+    has_update = current_version != latest_version if current_version and latest_version else False
+    
+    return {
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "has_update": has_update,
+    }
+
+@app.post("/api/jassub/update")
+async def jassub_update(user: str = Depends(require_auth), background_tasks: BackgroundTasks = BackgroundTasks()):
+    """下载最新版本的 JASSUB 文件"""
+    import urllib.request
+    import ssl as _ssl
+    import tarfile
+    import io as _io
+    
+    # 查询最新版本
+    ssl_ctx = _ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = _ssl.CERT_NONE
+    
+    try:
+        req = urllib.request.Request(
+            "https://registry.npmjs.org/jassub/latest",
+            headers={"User-Agent": "subtitle-burner"}
+        )
+        with urllib.request.urlopen(req, timeout=10, context=ssl_ctx) as resp:
+            latest_version = json.loads(resp.read()).get("version")
+    except Exception as e:
+        raise HTTPException(502, f"查询 npm 版本失败: {e}")
+    
+    if not latest_version:
+        raise HTTPException(502, "无法获取最新版本号")
+    
+    # 获取 tarball URL
+    try:
+        req = urllib.request.Request(
+            f"https://registry.npmjs.org/jassub/{latest_version}",
+            headers={"User-Agent": "subtitle-burner"}
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ssl_ctx) as resp:
+            pkg_info = json.loads(resp.read())
+        tarball_url = pkg_info.get("dist", {}).get("tarball", "")
+    except Exception as e:
+        raise HTTPException(502, f"获取包信息失败: {e}")
+    
+    # 下载 tarball
+    try:
+        req = urllib.request.Request(tarball_url, headers={"User-Agent": "subtitle-burner"})
+        with urllib.request.urlopen(req, timeout=120, context=ssl_ctx) as resp:
+            tarball_data = resp.read()
+    except Exception as e:
+        raise HTTPException(502, f"下载 tarball 失败: {e}")
+    
+    # 解压文件
+    output_dir = Path("app/static/js")
+    file_map = {
+        "package/dist/jassub.js": "jassub.js",
+        "package/dist/wasm/jassub-worker.js": "jassub-worker.js",
+        "package/dist/wasm/jassub-worker.wasm": "jassub-worker.wasm",
+    }
+    
+    extracted = []
+    try:
+        with tarfile.open(fileobj=_io.BytesIO(tarball_data), mode="r:gz") as tar:
+            for member in tar.getmembers():
+                for tar_path, output_name in file_map.items():
+                    if member.name == tar_path and member.isfile():
+                        f = tar.extractfile(member)
+                        if f:
+                            output_path = output_dir / output_name
+                            with open(output_path, "wb") as out:
+                                out.write(f.read())
+                            extracted.append(output_name)
+    except Exception as e:
+        raise HTTPException(500, f"解压失败: {e}")
+    
+    # 保存版本信息
+    from datetime import datetime
+    version_info = {
+        "current_version": latest_version,
+        "files": extracted,
+        "updated_at": datetime.now().isoformat(),
+        "source": "npm registry",
+        "package": "jassub",
+    }
+    JASSUB_VERSION_FILE.write_text(json.dumps(version_info, indent=2, ensure_ascii=False), encoding="utf-8")
+    
+    logger.info(f"[JASSUB] 已更新到版本 {latest_version}，文件: {extracted}")
+    return {"success": True, "version": latest_version, "files": extracted}
+
 async def validation_exception_handler(request, exc):
     """全局 422 处理：未登录时改返 401，已登录时返 422 + 详情"""
     auth = request.headers.get("Authorization", "") or request.cookies.get("sb_session", "")
