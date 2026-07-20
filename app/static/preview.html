@@ -586,24 +586,24 @@ async function createJassub(assContent, video) {
       wasmUrl: '/static/js/jassub-worker.wasm',
       modernWasmUrl: '/static/js/jassub-worker.wasm',
       availableFonts: {},
-      onError: (err) => {
-        console.error('[JASSUB]', err);
-        showStatus('JASSUB 渲染错误', 'error');
-      },
     });
-    console.log('[JASSUB] instance created, waiting for ready...');
+    console.log('[JASSUB] instance created');
+    showStatus('JASSUB 初始化中...', 'loading');
 
-    // Wait for ready with timeout
-    if (state.jassub.ready && typeof state.jassub.ready.then === 'function') {
-      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000));
-      await Promise.race([state.jassub.ready, timeout]);
-    }
-    console.log('[JASSUB] WASM ready');
-    showStatus('JASSUB 就绪', 'ok');
-  } catch (e) {
-    console.warn('[JASSUB] ready wait result:', e.message || e);
-    // Still try to use it — might work even if ready didn't resolve
+    // Don't block — let JASSUB init in background
+    state.jassub.ready?.then?.(() => {
+      console.log('[JASSUB] WASM ready');
+      showStatus('JASSUB 就绪', 'ok');
+    })?.catch?.((e) => {
+      console.warn('[JASSUB] ready error:', e);
+    });
+
+    // Style overlay
+    styleJassubOverlay();
     showStatus('JASSUB 已加载', 'ok');
+  } catch (e) {
+    console.error('[JASSUB] init error:', e);
+    showStatus('JASSUB 初始化失败', 'error');
   }
 
   // JASSUB v2 creates its own canvas inside a Shadow DOM on the video element
