@@ -355,15 +355,9 @@
   </div>
 </div>
 
-<!-- JASSUB v2 (ESM bundle, import.meta.url preserved) -->
-<script type="module">
-import JASSUB from '/static/js/jassub.bundle.mjs';
-window.JASSUBClass = JASSUB;
-console.log('[JASSUB] v2 ESM bundle loaded, type:', typeof JASSUB);
-// Notify the page that JASSUB is ready
-window.__jassubReady = true;
-window.dispatchEvent(new Event('jassub-loaded'));
-</script>
+<!-- JASSUB v2 loaded dynamically by init() -->
+
+<script>
 // ===== State =====
 const state = {
   videoPath: '', subtitlePath: '', sessionId: '', filename: '',
@@ -479,6 +473,18 @@ function showToast(msg, type = 'info') {
   d.textContent = msg;
   document.body.appendChild(d);
   setTimeout(() => d.remove(), 3000);
+}
+
+// ===== JASSUB Dynamic Loader =====
+async function loadJassub() {
+  try {
+    const module = await import('/static/js/jassub.bundle.mjs');
+    window.JASSUBClass = module.default;
+    console.log('[JASSUB] v2 loaded, type:', typeof window.JASSUBClass);
+  } catch (e) {
+    console.error('[JASSUB] Failed to load:', e);
+    showStatus('JASSUB 加载失败', 'error');
+  }
 }
 
 // ===== Font List =====
@@ -1049,7 +1055,8 @@ function startPreviewWithSelected() {
 async function init() {
   renderPresets();
   updateAllVals();
-  await loadFontList();
+  loadFontList(); // async, don't await
+  loadJassub();   // async, load in background
 
   // Get params from URL
   const urlParams = new URLSearchParams(window.location.search);
