@@ -573,6 +573,7 @@ function createJassub(assContent, video) {
     fallbackFont: 'sans-serif',
     workerUrl: '/static/js/jassub-worker.js',
     wasmUrl: '/static/js/jassub-worker.wasm',
+    modernWasmUrl: '/static/js/jassub-worker.wasm',  // same as fallback, avoids import.meta.url
     availableFonts: {},
     onError: (err) => {
       console.error('[JASSUB]', err);
