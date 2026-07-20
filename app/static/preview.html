@@ -359,8 +359,9 @@
 <script src="/static/js/jassub.bundle.js"></script>
 
 <script>
-// JASSUB is available as window.JASSUB from the bundle
-console.log('[JASSUB] v2 bundle loaded');
+// JASSUB is available as window.JASSUB.default from the IIFE bundle (export default class)
+const JASSUBClass = window.JASSUB?.default || window.JASSUB;
+console.log('[JASSUB] v2 bundle loaded, type:', typeof JASSUBClass);
 // ===== State =====
 const state = {
   videoPath: '', subtitlePath: '', sessionId: '', filename: '',
@@ -549,8 +550,6 @@ async function loadSubtitle(subtitlePath) {
 }
 
 // ===== JASSUB v2 Management =====
-let jassubReady = true; // Bundle is self-contained, ready immediately
-
 function destroyJassub() {
   if (state.jassub) {
     try {
@@ -561,13 +560,13 @@ function destroyJassub() {
 }
 
 function createJassub(assContent, video) {
-  if (!jassubReady || !window.JASSUB) {
-    console.warn('[JASSUB] Not loaded yet, deferring...');
-    state.pendingVideo = video;
+  if (!JASSUBClass) {
+    console.error('[JASSUB] Not loaded');
+    showStatus('JASSUB 未加载', 'error');
     return;
   }
   destroyJassub();
-  state.jassub = new window.JASSUB({
+  state.jassub = new JASSUBClass({
     video: video,
     content: assContent,
     subCharset: 'UTF-8',
